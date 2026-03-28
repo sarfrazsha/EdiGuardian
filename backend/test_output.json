@@ -1,0 +1,64 @@
+[
+  {
+    "_id": "69c56ca5697a5390af252975",
+    "studentName": "Abdul Basit",
+    "parentEmail": "parent@gmail.com",
+    "amount": 10000,
+    "dueDate": "2026-03-20",
+    "month": "June",
+    "status": "Paid",
+    "createdAt": "2026-03-26T17:28:05.387Z",
+    "updatedAt": "2026-03-26T17:28:54.310Z",
+    "__v": 0
+  },
+  {
+    "_id": "69c56d1a697a5390af252987",
+    "studentName": "Abdul Basit",
+    "parentEmail": "parent@gmail.com",
+    "amount": 100,
+    "dueDate": "2026-03-14",
+    "month": "June",
+    "status": "Paid",
+    "createdAt": "2026-03-26T17:30:02.470Z",
+    "updatedAt": "2026-03-26T17:31:07.582Z",
+    "__v": 0
+  },
+  {
+    "_id": "69c56ecf697a5390af25299d",
+    "studentName": "Abdul Basit",
+    "parentEmail": "parent@gmail.com",
+    "amount": 1323,
+    "dueDate": "2026-03-26",
+    "month": "October",
+    "status": "Pending",
+    "createdAt": "2026-03-26T17:37:19.758Z",
+    "updatedAt": "2026-03-26T17:37:19.758Z",
+    "__v": 0
+  },
+  {
+    "_id": "69c606c11e77ecec14c9f764",
+    "studentName": "Abdul Basit",
+    "classNo": "",
+    "parentEmail": "parent@gmail.com",
+    "amount": 123,
+    "dueDate": "2026-04-04",
+    "month": "September",
+    "status": "Paid",
+    "createdAt": "2026-03-27T04:25:37.865Z",
+    "updatedAt": "2026-03-27T04:27:40.048Z",
+    "__v": 0
+  },
+  {
+    "_id": "69c608e81e77ecec14c9f781",
+    "studentName": "Abdul Basit",
+    "classNo": "",
+    "parentEmail": "basitfather@gmail.com",
+    "amount": 222,
+    "dueDate": "2026-03-28",
+    "month": "November",
+    "status": "Pending",
+    "createdAt": "2026-03-27T04:34:48.692Z",
+    "updatedAt": "2026-03-27T04:34:48.692Z",
+    "__v": 0
+  }
+]

@@ -1,0 +1,32 @@
+[
+  {
+    "_id": "69c56ca5697a5390af252975",
+    "parentEmail": "parent@gmail.com",
+    "hasAdminVoucher": false,
+    "voucherLength": 0
+  },
+  {
+    "_id": "69c56d1a697a5390af252987",
+    "parentEmail": "parent@gmail.com",
+    "hasAdminVoucher": false,
+    "voucherLength": 0
+  },
+  {
+    "_id": "69c56ecf697a5390af25299d",
+    "parentEmail": "parent@gmail.com",
+    "hasAdminVoucher": false,
+    "voucherLength": 0
+  },
+  {
+    "_id": "69c606c11e77ecec14c9f764",
+    "parentEmail": "parent@gmail.com",
+    "hasAdminVoucher": true,
+    "voucherLength": 1063802
+  },
+  {
+    "_id": "69c608e81e77ecec14c9f781",
+    "parentEmail": "basitfather@gmail.com",
+    "hasAdminVoucher": true,
+    "voucherLength": 1063802
+  }
+]
