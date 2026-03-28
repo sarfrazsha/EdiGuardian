@@ -85,14 +85,26 @@ const Homework = () => {
             <Container fluid className="py-4">
                 <div className="d-flex justify-content-between align-items-center mb-4">
                     <div className="d-flex align-items-center gap-3">
-                        <Button
-                            variant="light"
-                            className="rounded-circle shadow-sm border p-2 d-flex align-items-center justify-content-center"
-                            style={{ width: '40px', height: '40px' }}
-                            onClick={() => navigate(-1)}
-                        >
-                            <i className="bi bi-arrow-left fs-5"></i>
-                        </Button>
+                        <div className="d-flex gap-2">
+                            <Button
+                                variant="light"
+                                className="rounded-circle shadow-sm border p-0 d-flex align-items-center justify-content-center"
+                                style={{ width: '40px', height: '40px' }}
+                                onClick={() => navigate(-1)}
+                                title="Go Back"
+                            >
+                                <i className="bi bi-arrow-left fs-5"></i>
+                            </Button>
+                            <Button
+                                variant="light"
+                                className="rounded-circle shadow-sm border p-0 d-flex align-items-center justify-content-center"
+                                style={{ width: '40px', height: '40px' }}
+                                onClick={() => navigate(1)}
+                                title="Go Forward"
+                            >
+                                <i className="bi bi-arrow-right fs-5"></i>
+                            </Button>
+                        </div>
                         <div>
                             <h2 className="fw-bold mb-0">Homework Assignments</h2>
                             <p className="text-muted small mb-0">View and manage classroom assignments</p>

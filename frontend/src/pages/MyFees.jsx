@@ -91,9 +91,26 @@ const MyFees = () => {
             <Container fluid className="py-4">
                 <div className="mb-4 d-flex justify-content-between align-items-center">
                     <div className="d-flex align-items-center gap-3">
-                        <Button variant="light" className="rounded-circle shadow-sm border p-2 d-flex align-items-center justify-content-center" style={{ width: '40px', height: '40px' }} onClick={() => navigate(-1)}>
-                            <i className="bi bi-arrow-left fs-5"></i>
-                        </Button>
+                        <div className="d-flex gap-2">
+                            <Button
+                                variant="light"
+                                className="rounded-circle shadow-sm border p-0 d-flex align-items-center justify-content-center"
+                                style={{ width: '40px', height: '40px' }}
+                                onClick={() => navigate(-1)}
+                                title="Go Back"
+                            >
+                                <i className="bi bi-arrow-left fs-5"></i>
+                            </Button>
+                            <Button
+                                variant="light"
+                                className="rounded-circle shadow-sm border p-0 d-flex align-items-center justify-content-center"
+                                style={{ width: '40px', height: '40px' }}
+                                onClick={() => navigate(1)}
+                                title="Go Forward"
+                            >
+                                <i className="bi bi-arrow-right fs-5"></i>
+                            </Button>
+                        </div>
                         <div>
                             <h2 className="fw-bold text-dark mb-0">My Fees & Invoices</h2>
                             <p className="text-muted mb-0">View pending fees and securely pay online.</p>
@@ -122,7 +139,7 @@ const MyFees = () => {
                                                 <h5 className="fw-bold mb-1">{fee.studentName}</h5>
                                             </div>
                                             <div className="text-end">
-                                                <h3 className="fw-bold text-dark mb-0">${fee.amount}</h3>
+                                                <h3 className="fw-bold text-dark mb-0">Rs {fee.amount}</h3>
                                             </div>
                                         </div>
 
@@ -234,14 +251,14 @@ const MyFees = () => {
                 <Modal.Body className="p-4">
                     <div className="text-center mb-4">
                         <i className="bi bi-wallet2 text-primary" style={{ fontSize: '3rem' }}></i>
-                        <h4 className="fw-bold mt-2">${selectedFee?.amount}</h4>
+                        <h4 className="fw-bold mt-2">Rs {selectedFee?.amount}</h4>
                         <p className="text-muted small">Paying for {selectedFee?.studentName} ({selectedFee?.month})</p>
                     </div>
 
                     <form action="https://cmaal.com/Pay/" method="POST">
                         <input type="hidden" name="pay_method" value="" />
                         <input type="hidden" name="amount" value={selectedFee?.amount || 0} />
-                        <input type="hidden" name="currency" value="USD" />
+                        <input type="hidden" name="currency" value="PKR" />
                         <input type="hidden" name="succes_url" value={`${window.location.origin}/payment-success?fee_id=${selectedFee?._id}`} />
                         <input type="hidden" name="cancel_url" value={`${window.location.origin}/my-fees`} />
                         <input type="hidden" name="client_email" value={email} />

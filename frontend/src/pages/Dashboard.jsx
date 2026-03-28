@@ -6,6 +6,7 @@ import Layout from '../components/Layout';
 const Dashboard = () => {
     const navigate = useNavigate();
     const [announcements, setAnnouncements] = useState([]);
+    const [adminStats, setAdminStats] = useState({ students: 0, teachers: 0, classes: 0 });
     const [isLoading, setIsLoading] = useState(true);
     const [userData, setUserData] = useState({ name: '', role: '', email: '' });
 
@@ -30,12 +31,30 @@ const Dashboard = () => {
             .then(res => res.json())
             .then(data => {
                 setAnnouncements(data.slice(0, 3));
-                setIsLoading(false);
             })
             .catch(err => {
-                console.error("Fetch error:", err);
-                setIsLoading(false);
+                console.error("Fetch announcements error:", err);
             });
+
+        // 5. Fetch dashboard stats if admin
+        if (role?.toLowerCase() === 'admin') {
+            fetch('http://localhost:8080/users')
+                .then(res => res.json())
+                .then(data => {
+                    setAdminStats({
+                        students: data.totalStudents || 0,
+                        teachers: data.totalTeachers || 0,
+                        classes: data.totalClasses || 0
+                    });
+                    setIsLoading(false);
+                })
+                .catch(err => {
+                    console.error("Fetch stats error:", err);
+                    setIsLoading(false);
+                });
+        } else {
+            setIsLoading(false);
+        }
     }, [navigate]);
 
     // ROLE-BASED STATS CONFIGURATION
@@ -43,10 +62,10 @@ const Dashboard = () => {
         const userRole = userData.role?.toLowerCase();
         if (userRole === 'admin') {
             return [
-                { label: 'Total Students', value: '1,250', icon: 'bi-people', color: 'primary' },
-                { label: 'Active Teachers', value: '45', icon: 'bi-person-badge', color: 'success' },
-                { label: 'Monthly Revenue', value: '$12,400', icon: 'bi-cash-stack', color: 'info' },
-                { label: 'System Queries', value: '08', icon: 'bi-chat-dots', color: 'warning' }
+                { label: 'Active Students', value: adminStats.students, icon: 'bi-people', color: 'primary' },
+                { label: 'Active Teachers', value: adminStats.teachers, icon: 'bi-person-badge', color: 'success' },
+                { label: 'Active Classes', value: adminStats.classes, icon: 'bi-building', color: 'warning' },
+                { label: 'Monthly Revenue', value: 'Rs 12,400', icon: 'bi-cash-stack', color: 'info' }
             ];
         } else if (userRole === 'teacher') {
             return [
@@ -109,7 +128,7 @@ const Dashboard = () => {
 
                 <Row className="g-4">
                     {/* Recent Announcements */}
-                    <Col lg={8}>
+                    <Col lg={12}>
                         <Card className="border-0 shadow-sm rounded-4 h-100">
                             <Card.Header className="bg-white py-3 border-0 d-flex justify-content-between align-items-center">
                                 <h5 className="fw-bold mb-0">Bulletin Board</h5>
@@ -130,24 +149,6 @@ const Dashboard = () => {
                                     </div>
                                 )}
                             </Card.Body>
-                        </Card>
-                    </Col>
-
-                    {/* Quick Action Card */}
-                    <Col lg={4}>
-                        <Card className="border-0 shadow-sm rounded-4 bg-dark text-white p-4 h-100 text-center d-flex flex-column justify-content-center">
-                            <i className="bi bi-shield-check text-primary display-4 mb-3"></i>
-                            <h5 className="fw-bold">Security Hub</h5>
-                            <p className="small text-secondary px-2">Your session is encrypted. Always remember to logout when you are finished.</p>
-                            {userData.role?.toLowerCase() === 'admin' && (
-                                <Button 
-                                    variant="outline-primary" 
-                                    className="rounded-pill mt-3 fw-bold"
-                                    onClick={() => navigate('/manage-users')}
-                                >
-                                    Manage Permissions
-                                </Button>
-                            )}
                         </Card>
                     </Col>
                 </Row>

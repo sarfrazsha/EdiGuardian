@@ -64,11 +64,18 @@ app.get("/users", async (req, res) => {
     countStudent = await Student.countDocuments({});
     countTeachers = await Teacher.countDocuments({});
     countAdmins = await Admin.countDocuments({});
-    res.status(201).json({
+
+    const teacherClasses = await Teacher.distinct('teacherClass');
+    const studentClasses = await Student.distinct('classNo');
+    const parentClasses = await Parent.distinct('classNo');
+    const activeClasses = new Set([...teacherClasses, ...studentClasses, ...parentClasses].filter(Boolean));
+    const countClasses = activeClasses.size;
+    res.status(200).json({
         totalStudents: countStudent,
         totalParents: countParents,
         totalAdmins: countAdmins,
-        totalTeachers: countTeachers
+        totalTeachers: countTeachers,
+        totalClasses: countClasses
     })
 
 
@@ -295,10 +302,17 @@ app.delete("/api/announcements/:id", async (req, res) => {
 
 app.get("/api/parents", async (req, res) => {
     try {
-        // Need both parentName, parentEmail and potentially linked student info
-        // Admin uses this to select a parent to invoice. We'll send standard parent properties.
-        const parents = await Parent.find({});
-        res.json(parents);
+        const parents = await Parent.find({}).lean();
+        const students = await Student.find({}).lean();
+        const parentsExtended = parents.map(p => {
+            const student = students.find(s => s.studentId === p.studentId);
+            return {
+                ...p,
+                studentName: student ? student.studentName : 'Unknown',
+                classNo: p.classNo || (student ? student.classNo : '')
+            };
+        });
+        res.json(parentsExtended);
     } catch (err) {
         res.status(500).json({ message: "Error fetching parents" });
     }

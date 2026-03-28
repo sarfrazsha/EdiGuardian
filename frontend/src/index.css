@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap');
+
 :root {
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
@@ -25,7 +27,6 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  /* Removed default Vite centering styles to allow full width background */
 }
 
 h1 {
@@ -59,18 +60,14 @@ button:focus-visible {
     color: #213547;
     background-color: #ffffff;
   }
-
   a:hover {
     color: #747bff;
   }
-
   button {
     background-color: #f9f9f9;
   }
 }
 
-/* Custom Background Class for Landing Page */
-/* Hero Section */
 .hero-section {
   background-size: cover;
   background-position: center;
@@ -84,7 +81,6 @@ button:focus-visible {
   align-items: center;
 }
 
-/* Gradient Overlay for better text readability */
 .hero-overlay {
   position: absolute;
   top: 0;
@@ -95,7 +91,6 @@ button:focus-visible {
   z-index: 1;
 }
 
-/* Ensure content is above overlay */
 .hero-content {
   position: relative;
   z-index: 2;
@@ -105,29 +100,55 @@ button:focus-visible {
 @media (max-width: 768px) {
   .hero-section {
     min-height: 100vh;
-    /* Full height on mobile looks better */:root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+    background-attachment: scroll;
+  }
+}
+
+:root {
+  /* Playful, Kid-Friendly, yet Professional Color Palette */
+  --bs-primary: #4361ee !important;      
+  --bs-primary-rgb: 67, 97, 238 !important;
+  --bs-secondary: #64748b !important;    
+  --bs-secondary-rgb: 100, 116, 139 !important;
+  --bs-success: #4cc9f0 !important;      
+  --bs-success-rgb: 76, 201, 240 !important;
+  --bs-info: #f8961e !important;         
+  --bs-info-rgb: 248, 150, 30 !important;
+  --bs-warning: #f9c74f !important;      
+  --bs-warning-rgb: 249, 199, 79 !important;
+  --bs-danger: #ef476f !important;       
+  --bs-danger-rgb: 239, 71, 111 !important;
   
-  /* 1. Change to light to prevent forced dark backgrounds */
-  color-scheme: light; 
-  
-  /* 2. Neutralize colors so they don't override your landing page */
-  color: #213547;
-  background-color: #ffffff;
-  
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  --bs-body-font-family: 'Nunito', system-ui, -apple-system, sans-serif !important;
+  font-family: var(--bs-body-font-family);
 }
 
 body {
-  margin: 0;
-  padding: 0;
-  width: 100%;
-  min-height: 100vh;
-  overflow-x: hidden; /* Prevents unwanted horizontal scrolling */
+  background-color: #f4f7fe; 
+  font-family: var(--bs-body-font-family);
+}
+
+.card {
+  border-radius: 1.25rem !important;
+  border: none !important;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.05) !important;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #4361ee, #3a0ca3) !important;
+  border: none !important;
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 15px rgba(67, 97, 238, 0.3) !important;
+}
+
+.btn {
+  border-radius: 50rem !important; 
+  font-weight: 700 !important;
+  letter-spacing: 0.5px;
 }
 
 #root {
@@ -135,8 +156,4 @@ body {
   margin: 0;
   padding: 0;
 }
-
-/* ... Keep your .hero-section and .hero-overlay as you wrote them ... */
-    background-attachment: scroll;
-  }
-}
+

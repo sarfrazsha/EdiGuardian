@@ -101,9 +101,8 @@ const ManageFees = () => {
         }
     };
 
-    // Calculate unique classes
+    // Calculate unique classes strictly from DB
     const classesList = [...new Set([
-        'Grade 09', 'Grade 10', 'Grade 11', 'Grade 12',
         ...parents.map(p => p.classNo).filter(Boolean)
     ])].sort();
 
@@ -166,7 +165,7 @@ const ManageFees = () => {
                                                 <option value="ALL" className="fw-bold text-primary">Issue to All Students in {formData.classNo}</option>
                                             )}
                                             {filteredParents.map((p, idx) => (
-                                                <option key={idx} value={p.parentEmail}>{p.parentName} ({p.parentEmail})</option>
+                                                <option key={idx} value={p.parentEmail}>Parent of {p.studentName} ({p.parentEmail})</option>
                                             ))}
                                         </Form.Select>
                                     </Form.Group>
@@ -194,8 +193,8 @@ const ManageFees = () => {
                                     <Row>
                                         <Col md={6}>
                                             <Form.Group className="mb-3">
-                                                <Form.Label className="small fw-bold text-secondary">Amount ($)</Form.Label>
-                                                <Form.Control required type="number" min="1" name="amount" value={formData.amount} onChange={handleChange} placeholder="0.00" />
+                                                <Form.Label className="small fw-bold text-secondary">Amount (Rs)</Form.Label>
+                                                <Form.Control required type="number" min="1" name="amount" value={formData.amount} onChange={handleChange} placeholder="0" />
                                             </Form.Group>
                                         </Col>
                                         <Col md={6}>
@@ -236,13 +235,13 @@ const ManageFees = () => {
 
                     {/* Fee Records Table */}
                     <Col lg={8}>
-                        <Card className="border-0 shadow-sm rounded-4 h-100">
-                            <Card.Body className="p-0">
+                        <Card className="border-0 shadow-sm rounded-4 h-100 d-flex flex-column">
+                            <Card.Body className="p-0 d-flex flex-column">
                                 <div className="p-4 border-bottom d-flex justify-content-between align-items-center">
                                     <h5 className="fw-bold mb-0">Fee Records Hub</h5>
                                     {loading && <Spinner size="sm" variant="primary" />}
                                 </div>
-                                <div className="table-responsive">
+                                <div className="table-responsive flex-grow-1">
                                     <Table hover className="align-middle mb-0 custom-table">
                                         <thead className="bg-light">
                                             <tr>
@@ -260,7 +259,7 @@ const ManageFees = () => {
                                                     <td className="ps-4 fw-medium text-dark">{f.studentName}</td>
                                                     <td className="small text-muted">{f.parentEmail}</td>
                                                     <td>{f.month}</td>
-                                                    <td className="fw-bold text-primary">${f.amount}</td>
+                                                    <td className="fw-bold text-primary">Rs {f.amount}</td>
                                                     <td className="small">{new Date(f.dueDate).toLocaleDateString()}</td>
                                                     <td className="text-center">
                                                         {f.status === 'Paid' && (

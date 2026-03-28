@@ -69,7 +69,9 @@ const handleSubmit = async (e) => {
                 <Container className="hero-content d-flex justify-content-center align-items-center">
                     <Card className="shadow-lg p-4" style={{ width: '100%', maxWidth: '400px', backgroundColor: 'rgba(255, 255, 255, 0.95)' }}>
                         <Card.Body>
-                            <h2 className="text-center mb-4 fw-bold text-primary">{role} Login</h2>
+                            <h2 className="text-center mb-4 fw-bold" style={{ color: '#4361ee' }}>
+                                <span className="text-capitalize">{role}</span> Login
+                            </h2>
                             <Form onSubmit={handleSubmit}>
                                 <Form.Group className="mb-3" controlId="formBasicEmail">
                                     <Form.Label>Email address</Form.Label>
@@ -91,26 +93,15 @@ const handleSubmit = async (e) => {
                                             value={password}
                                             onChange={(e) => setPassword(e.target.value)}
                                             required
+                                            className="border-end-0 border-secondary-subtle"
                                         />
-                                        <Button
-                                            variant="outline-secondary"
+                                        <InputGroup.Text 
                                             onClick={() => setShowPassword(!showPassword)}
-                                            style={{
-                                                borderLeft: 'none',
-                                                transition: 'all 0.3s ease',
-                                                backgroundColor: 'white'
-                                            }}
-                                            onMouseEnter={(e) => {
-                                                e.currentTarget.style.backgroundColor = '#f8f9fa';
-                                                e.currentTarget.style.color = '#0d6efd';
-                                            }}
-                                            onMouseLeave={(e) => {
-                                                e.currentTarget.style.backgroundColor = 'white';
-                                                e.currentTarget.style.color = '#6c757d';
-                                            }}
+                                            className="bg-white border-start-0 border-secondary-subtle"
+                                            style={{ cursor: 'pointer' }}
                                         >
-                                            <i className={`bi ${showPassword ? 'bi-eye-slash' : 'bi-eye'}`}></i>
-                                        </Button>
+                                            <i className={`bi ${showPassword ? 'bi-eye-slash text-primary' : 'bi-eye text-muted'}`}></i>
+                                        </InputGroup.Text>
                                     </InputGroup>
                                 </Form.Group>
 

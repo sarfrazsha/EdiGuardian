@@ -1,10 +1,11 @@
 import React, { useRef, useState } from 'react';
-import { Nav } from 'react-bootstrap';
+import { Nav, Offcanvas } from 'react-bootstrap';
 import { useNavigate, useLocation } from 'react-router-dom';
+import logo from '../assets/logo.png';
 
 const DEFAULT_AVATAR = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='90' height='90' viewBox='0 0 90 90'%3E%3Ccircle cx='45' cy='45' r='45' fill='%23374151'/%3E%3Ccircle cx='45' cy='34' r='18' fill='%236B7280'/%3E%3Cellipse cx='45' cy='80' rx='28' ry='22' fill='%236B7280'/%3E%3C/svg%3E";
 
-const Sidebar = () => {
+const Sidebar = ({ showMobileSidebar, onHideMobileSidebar }) => {
     const navigate = useNavigate();
     const location = useLocation();
     const fileInputRef = useRef(null);
@@ -56,7 +57,10 @@ const Sidebar = () => {
         const isActive = location.pathname === path;
         return (
             <Nav.Link
-                onClick={() => navigate(path, { state: { email, role, uname } })}
+                onClick={() => {
+                    navigate(path, { state: { email, role, uname } });
+                    if (onHideMobileSidebar) onHideMobileSidebar();
+                }}
                 className={`d-flex align-items-center px-4 py-3 mb-2 rounded-3 text-white transition-all ${isActive ? 'bg-primary shadow-lg active' : 'opacity-75 hover-bg-dark'}`}
                 style={{ cursor: 'pointer', transition: 'all 0.3s' }}
             >
@@ -66,24 +70,29 @@ const Sidebar = () => {
         );
     };
 
-    return (
-        <div
-            className="bg-dark vh-100 sticky-top d-flex flex-column shadow"
-            style={{ width: '280px', flexShrink: 0 }}
-            onClick={() => setShowPicMenu(false)}
-        >
+    const sidebarContent = (
+        <>
             {/* Sidebar Branding & Back Button */}
             <div className="p-3 mb-2 d-flex align-items-center border-bottom border-secondary">
-                <button
-                    onClick={() => navigate(-1)}
-                    className="btn btn-sm btn-outline-secondary text-white border-0 me-2 p-1"
-                    title="Go Back"
-                >
-                    <i className="bi bi-arrow-left fs-5"></i>
-                </button>
+                <div className="d-flex gap-1 me-2">
+                    <button
+                        onClick={() => navigate(-1)}
+                        className="btn btn-sm btn-outline-secondary text-white border-0 p-1"
+                        title="Go Back"
+                    >
+                        <i className="bi bi-arrow-left fs-5"></i>
+                    </button>
+                    <button
+                        onClick={() => navigate(1)}
+                        className="btn btn-sm btn-outline-secondary text-white border-0 p-1"
+                        title="Go Forward"
+                    >
+                        <i className="bi bi-arrow-right fs-5"></i>
+                    </button>
+                </div>
                 <div className="d-flex align-items-center cursor-pointer" onClick={() => navigate('/')} style={{ cursor: 'pointer' }}>
-                    <i className="bi bi-shield-lock-fill text-primary fs-3 me-2"></i>
-                    <h5 className="mb-0 fw-bold text-white ls-1 text-truncate">EduGuardian</h5>
+                    <img src={logo} alt="EduGuardian" height="40" className="me-2 rounded-circle shadow-sm" />
+                    <h5 className="mb-0 fw-bold text-white ls-1" style={{ fontSize: '1.1rem' }}>EduGuardian</h5>
                 </div>
             </div>
 
@@ -194,12 +203,25 @@ const Sidebar = () => {
                     </>
                 )}
 
-                {/* Role-Based Links (Teacher & Student) */}
-                {(role?.toLowerCase() === 'teacher' || role?.toLowerCase() === 'student') && (
+                {/* Role-Based Links (Teacher) */}
+                {(role?.toLowerCase() === 'teacher') && (
                     <>
                         <div className="text-uppercase text-secondary x-small fw-bold mt-4 mb-2 ps-2" style={{ fontSize: '0.7rem', letterSpacing: '1px' }}>
                             Academic
                         </div>
+                        {navLink('/attendance', 'bi-calendar-check-fill', 'Attendance')}
+                        {navLink('/manage-results', 'bi-award-fill', 'Manage Results')}
+                        {navLink('/homework', 'bi-book-fill', 'Homework')}
+                    </>
+                )}
+
+                {/* Role-Based Links (Student) */}
+                {(role?.toLowerCase() === 'student') && (
+                    <>
+                        <div className="text-uppercase text-secondary x-small fw-bold mt-4 mb-2 ps-2" style={{ fontSize: '0.7rem', letterSpacing: '1px' }}>
+                            Academic
+                        </div>
+                        {navLink('/results', 'bi-award-fill', 'Results')}
                         {navLink('/homework', 'bi-book-fill', 'Homework')}
                     </>
                 )}
@@ -210,12 +232,31 @@ const Sidebar = () => {
                         <div className="text-uppercase text-secondary x-small fw-bold mt-4 mb-2 ps-2" style={{ fontSize: '0.7rem', letterSpacing: '1px' }}>
                             Parent Portal
                         </div>
+                        {navLink('/results', 'bi-award-fill', 'Results')}
                         {navLink('/my-fees', 'bi-cash-stack', 'My Fees')}
                     </>
                 )}
             </Nav>
+        </>
+    );
 
+    return (
+        <>
+            {/* Desktop Static Sidebar */}
+            <div
+                className="bg-dark vh-100 d-none d-md-flex flex-column shadow flex-shrink-0"
+                style={{ width: '280px', position: 'sticky', top: 0 }}
+                onClick={() => setShowPicMenu(false)}
+            >
+                {sidebarContent}
+            </div>
 
+            {/* Mobile Offcanvas Sidebar */}
+            <Offcanvas show={showMobileSidebar} onHide={onHideMobileSidebar} className="bg-dark text-white shadow" style={{ width: '280px' }}>
+                <Offcanvas.Body className="p-0 d-flex flex-column h-100" onClick={() => setShowPicMenu(false)}>
+                    {sidebarContent}
+                </Offcanvas.Body>
+            </Offcanvas>
 
             <style>{`
                 @keyframes fadeInDown {
@@ -223,7 +264,7 @@ const Sidebar = () => {
                     to   { opacity: 1; transform: translateY(0); }
                 }
             `}</style>
-        </div>
+        </>
     );
 };
 

@@ -16,6 +16,7 @@ import Homework from './pages/Homework';
 import ManageFees from './pages/ManageFees';
 import MyFees from './pages/MyFees';
 import PaymentSuccess from './pages/PaymentSuccess';
+import ManageResults from './pages/ManageResults';
 
 function App() {
   return (
@@ -33,6 +34,7 @@ function App() {
         <Route path="/manage-fees" element={<ManageFees />} />
         <Route path="/my-fees" element={<MyFees />} />
         <Route path="/payment-success" element={<PaymentSuccess />} />
+        <Route path="/manage-results" element={<ManageResults />} />
         <Route path="/help" element={<Help />} />
         <Route path="/contact" element={<Contact />} />
         <Route path="/support" element={<Support />} />
