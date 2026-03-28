@@ -74,6 +74,7 @@ const ManageClasses = () => {
     const [selectedStudent, setSelectedStudent] = useState(null);
     const [isEditingStudent, setIsEditingStudent] = useState(false);
     const [editingStudentData, setEditingStudentData] = useState(null);
+    const [searchTerm, setSearchTerm] = useState('');
 
     const handleSaveStudent = () => {
         setAllStudents(allStudents.map(s => s.id === editingStudentData.id ? editingStudentData : s));
@@ -200,8 +201,14 @@ const ManageClasses = () => {
     );
 
     const renderClassDetail = () => {
-        // Filter students belonging to this class
-        const enrolledStudents = allStudents.filter(s => s.studentClass === selectedClass.name);
+        // Filter students belonging to this class and apply search
+        const enrolledStudents = allStudents.filter(s => {
+            const matchesClass = s.studentClass === selectedClass.name;
+            const matchesSearch = !searchTerm || 
+                s.studentName.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                (s.studentRollNo && s.studentRollNo.toString().toLowerCase().includes(searchTerm.toLowerCase()));
+            return matchesClass && matchesSearch;
+        });
 
         return (
             <>
@@ -224,13 +231,32 @@ const ManageClasses = () => {
                 </div>
 
                 <Card className="border-0 shadow-sm rounded-4 overflow-hidden bg-white">
-                    <Card.Header className="bg-white border-bottom py-4 px-4 d-flex justify-content-between align-items-center">
+                    <Card.Header className="bg-white border-bottom py-3 px-4 d-flex justify-content-between align-items-center flex-wrap gap-3">
                         <h5 className="fw-bold mb-0 text-dark d-flex align-items-center">
                             <i className="bi bi-people-fill text-primary me-2"></i> Class Roster
                         </h5>
-                        <Badge bg="secondary" className="bg-opacity-10 text-secondary border px-3 py-2 rounded-pill">
-                            {enrolledStudents.length} Students Enrolled
-                        </Badge>
+                        <div className="d-flex align-items-center gap-3">
+                            <div className="input-group input-group-sm" style={{ width: '250px' }}>
+                                <span className="input-group-text bg-light border-0">
+                                    <i className="bi bi-search text-muted"></i>
+                                </span>
+                                <Form.Control
+                                    type="text"
+                                    placeholder="Search student..."
+                                    className="bg-light border-0 shadow-none"
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                />
+                                {searchTerm && (
+                                    <Button variant="light" className="border-0 bg-light" onClick={() => setSearchTerm('')}>
+                                        <i className="bi bi-x"></i>
+                                    </Button>
+                                )}
+                            </div>
+                            <Badge bg="secondary" className="bg-opacity-10 text-secondary border px-3 py-2 rounded-pill">
+                                {enrolledStudents.length} Students
+                            </Badge>
+                        </div>
                     </Card.Header>
                     <Card.Body className="p-0">
                         <Table responsive hover className="mb-0 custom-table">

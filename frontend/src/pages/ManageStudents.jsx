@@ -235,8 +235,8 @@
 // };
 
 // export default ManageStudents;
-import React, { useState, useEffect } from 'react';
-import { Container, Form, Button, Row, Col, Card, Modal, Badge, Table, Alert, Spinner } from 'react-bootstrap';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import { Container, Form, Button, Row, Col, Card, Modal, Badge, Table, Alert, Spinner, Breadcrumb } from 'react-bootstrap';
 import { useLocation, Navigate, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import Axios from 'axios';
@@ -244,10 +244,21 @@ import Axios from 'axios';
 const ManageStudents = () => {
     const location = useLocation();
     const navigate = useNavigate();
-    const { email, role } = location.state || {
+    const { email, role, classFilter, openAdd } = location.state || {
         email: localStorage.getItem('userEmail'),
         role: localStorage.getItem('userRole')
     };
+
+    const formRef = useRef(null);
+    const listRef = useRef(null);
+
+    useLayoutEffect(() => {
+        if (openAdd && formRef.current) {
+            formRef.current.scrollIntoView({ behavior: 'smooth' });
+        } else if (classFilter && listRef.current) {
+            listRef.current.scrollIntoView({ behavior: 'smooth' });
+        }
+    }, [openAdd, classFilter]);
 
     // SDS Requirement: Role-Based Access Control
     if (!email || (role !== 'Admin' && role !== 'admin')) {
@@ -298,6 +309,15 @@ const ManageStudents = () => {
     ];
 
     const [students, setStudents] = useState(initialStudents);
+    const [searchTerm, setSearchTerm] = useState('');
+
+    const filteredStudents = students.filter(s => {
+        const matchesClass = !classFilter || (s.studentClass === classFilter || s.classNo === classFilter);
+        const matchesSearch = !searchTerm || 
+            s.studentName.toLowerCase().includes(searchTerm.toLowerCase()) || 
+            (s.studentRollNo && s.studentRollNo.toString().toLowerCase().includes(searchTerm.toLowerCase()));
+        return matchesClass && matchesSearch;
+    });
 
     const [formData, setFormData] = useState({
         studentName: '',
@@ -397,16 +417,31 @@ const ManageStudents = () => {
                         </div>
                         <div>
                             <h2 className="fw-bold text-dark mb-0">Student Admission Portal</h2>
-                            <p className="text-muted mb-0">SDS Compliance: Dual-Account Onboarding (Student & Parent)</p>
+                            <Breadcrumb className="small mb-0">
+                                <Breadcrumb.Item active>SDS Compliance</Breadcrumb.Item>
+                                {classFilter && <Breadcrumb.Item active>Class: {classFilter}</Breadcrumb.Item>}
+                            </Breadcrumb>
                         </div>
                     </div>
-                    <Badge bg="primary" className="p-2 px-3 rounded-pill shadow-sm">
-                        Registered: {students.length}
-                    </Badge>
+                    <div className="d-flex gap-2 align-items-center">
+                        {classFilter && (
+                            <Button 
+                                variant="outline-danger" 
+                                size="sm" 
+                                className="rounded-pill px-3"
+                                onClick={() => navigate(location.pathname, { state: { email, role, uname } })}
+                            >
+                                <i className="bi bi-x-circle me-1"></i> Clear Filter
+                            </Button>
+                        )}
+                        <Badge bg="primary" className="p-2 px-3 rounded-pill shadow-sm">
+                            Showing: {filteredStudents.length} / {students.length}
+                        </Badge>
+                    </div>
                 </div>
 
                 <Row className="g-4">
-                    <Col lg={12}>
+                    <Col lg={12} ref={formRef}>
                         <Card className="border-0 shadow-sm rounded-4 mb-4">
                             <Card.Body className="p-4">
                                 <Form noValidate validated={validated} onSubmit={handleSubmit}>
@@ -529,8 +564,34 @@ const ManageStudents = () => {
                     <Col lg={12}>
                         <Card className="border-0 shadow-sm rounded-4">
                             <Card.Body className="p-0">
+                                <div className="p-4 border-bottom d-flex justify-content-between align-items-center bg-white rounded-top-4">
+                                    <h5 className="fw-bold mb-0">Student Directory {classFilter && <span className="text-primary">— Class {classFilter}</span>}</h5>
+                                    <div className="d-flex gap-2" style={{ width: '300px' }}>
+                                        <div className="input-group input-group-sm">
+                                            <span className="input-group-text bg-light border-0">
+                                                <i className="bi bi-search text-muted"></i>
+                                            </span>
+                                            <Form.Control
+                                                type="text"
+                                                placeholder="Search by name or roll no..."
+                                                className="bg-light border-0 shadow-none"
+                                                value={searchTerm}
+                                                onChange={(e) => setSearchTerm(e.target.value)}
+                                            />
+                                            {searchTerm && (
+                                                <Button 
+                                                    variant="light" 
+                                                    className="border-0 bg-light"
+                                                    onClick={() => setSearchTerm('')}
+                                                >
+                                                    <i className="bi bi-x"></i>
+                                                </Button>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
                                 <div className="table-responsive">
-                                    <Table hover className="align-middle mb-0 custom-table">
+                                    <Table hover className="align-middle mb-0 custom-table" ref={listRef}>
                                         <thead className="bg-light">
                                             <tr>
                                                 <th className="ps-4">Student Name</th>
@@ -541,7 +602,7 @@ const ManageStudents = () => {
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {students.map((s, idx) => (
+                                            {filteredStudents.length > 0 ? filteredStudents.map((s, idx) => (
                                                 <tr key={idx}>
                                                     <td className="ps-4">
                                                         <div className="d-flex align-items-center">
@@ -568,7 +629,13 @@ const ManageStudents = () => {
                                                         <Badge bg="success" className="bg-opacity-10 text-success">Active</Badge>
                                                     </td>
                                                 </tr>
-                                            ))}
+                                            )) : (
+                                                <tr>
+                                                    <td colSpan="5" className="text-center py-5 text-muted">
+                                                        No records found for Class {classFilter || 'selected'}.
+                                                    </td>
+                                                </tr>
+                                            )}
                                         </tbody>
                                     </Table>
                                 </div>

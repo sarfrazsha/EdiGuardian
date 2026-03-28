@@ -80,6 +80,18 @@ app.get("/users", async (req, res) => {
 
 
 })
+
+// GET all distinct class names (for class picker in sidebar)
+app.get("/api/classes", async (req, res) => {
+    try {
+        const studentClasses = await Student.distinct('classNo');
+        const parentClasses = await Parent.distinct('classNo');
+        const classes = [...new Set([...studentClasses, ...parentClasses].filter(Boolean))].sort();
+        res.status(200).json(classes);
+    } catch (err) {
+        res.status(500).json({ message: "Error fetching classes" });
+    }
+});
 app.post("/students", async (req, res) => {
     let { studentName, studentAge, studentRollNo, studentGender, studentEmail, studentPassword, studentRole, parentName, parentPhone, parentAddress, parentEmail, parentPassword, parentRole } = req.body;
     const student = new Student({
@@ -205,10 +217,20 @@ app.post("/users", async (req, res) => {
 
 // Announcement Routes
 
-// GET all announcements
+// GET announcements (optionally filtered by role for marquee)
 app.get("/api/announcements", async (req, res) => {
     try {
-        const announcements = await Announcement.find().sort({ createdAt: -1 });
+        const { role } = req.query;
+        const now = new Date();
+        let filter = {
+            // Exclude announcements that have expired
+            $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }]
+        };
+        if (role && role.toLowerCase() !== 'admin') {
+            // Return announcements targeted at 'all' or specifically this role
+            filter.targetAudience = { $in: ['all', role.toLowerCase()] };
+        }
+        const announcements = await Announcement.find(filter).sort({ createdAt: -1 });
         res.json(announcements);
     } catch (err) {
         res.status(500).json({ message: "Error fetching announcements" });
@@ -218,15 +240,23 @@ app.get("/api/announcements", async (req, res) => {
 // POST create announcement
 app.post("/api/announcements", async (req, res) => {
     try {
-        const { title, content, role } = req.body;
+        const { title, content, role, targetAudience, durationDays } = req.body;
         // Simple role check
         if (role !== "admin" && role !== "Admin") {
             return res.status(403).json({ message: "Unauthorized: Admins only" });
         }
 
+        let expiresAt = null;
+        if (durationDays && Number(durationDays) > 0) {
+            expiresAt = new Date();
+            expiresAt.setDate(expiresAt.getDate() + Number(durationDays));
+        }
+
         const newAnnouncement = new Announcement({
             title,
-            content
+            content,
+            targetAudience: targetAudience || 'all',
+            expiresAt
         });
         await newAnnouncement.save();
         res.status(201).json(newAnnouncement);
@@ -239,15 +269,21 @@ app.post("/api/announcements", async (req, res) => {
 app.put("/api/announcements/:id", async (req, res) => {
     try {
         const { id } = req.params;
-        const { title, content, role } = req.body;
+        const { title, content, role, targetAudience, durationDays } = req.body;
 
         if (role !== "admin" && role !== "Admin") {
             return res.status(403).json({ message: "Unauthorized: Admins only" });
         }
 
+        let expiresAt = null;
+        if (durationDays && Number(durationDays) > 0) {
+            expiresAt = new Date();
+            expiresAt.setDate(expiresAt.getDate() + Number(durationDays));
+        }
+
         const updatedAnnouncement = await Announcement.findByIdAndUpdate(
             id,
-            { title, content },
+            { title, content, targetAudience: targetAudience || 'all', expiresAt },
             { new: true }
         );
         res.json(updatedAnnouncement);

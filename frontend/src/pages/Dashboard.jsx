@@ -26,8 +26,8 @@ const Dashboard = () => {
         // 3. Set user data to state
         setUserData({ name, role, email });
 
-        // 4. Fetch Announcements from backend
-        fetch('http://localhost:8080/api/announcements')
+        // 4. Fetch Announcements from backend (filtered by role)
+        fetch(`http://localhost:8080/api/announcements?role=${(role || '').toLowerCase()}`)
             .then(res => res.json())
             .then(data => {
                 setAnnouncements(data.slice(0, 3));

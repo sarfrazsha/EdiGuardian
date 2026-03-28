@@ -1,6 +1,7 @@
-import React, { useRef, useState } from 'react';
-import { Nav, Offcanvas } from 'react-bootstrap';
+import React, { useRef, useState, useEffect } from 'react';
+import { Nav, Offcanvas, Modal, Button, Form, Spinner } from 'react-bootstrap';
 import { useNavigate, useLocation } from 'react-router-dom';
+import axios from 'axios';
 import logo from '../assets/logo.png';
 
 const DEFAULT_AVATAR = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='90' height='90' viewBox='0 0 90 90'%3E%3Ccircle cx='45' cy='45' r='45' fill='%23374151'/%3E%3Ccircle cx='45' cy='34' r='18' fill='%236B7280'/%3E%3Cellipse cx='45' cy='80' rx='28' ry='22' fill='%236B7280'/%3E%3C/svg%3E";
@@ -20,6 +21,32 @@ const Sidebar = ({ showMobileSidebar, onHideMobileSidebar }) => {
         () => localStorage.getItem('userProfilePic') || DEFAULT_AVATAR
     );
     const [showPicMenu, setShowPicMenu] = useState(false);
+    // Entity action dialog: { label, addPath, managePath, step: 'action' | 'class' }
+    const [entityDialog, setEntityDialog] = useState(null);
+    const [classes, setClasses] = useState([]);
+    const [loadingClasses, setLoadingClasses] = useState(false);
+
+    useEffect(() => {
+        if (entityDialog && (entityDialog.label === 'Students' || entityDialog.label === 'Parents')) {
+            const fetchClasses = async () => {
+                setLoadingClasses(true);
+                try {
+                    const res = await axios.get('http://localhost:8080/api/classes');
+                    setClasses(res.data);
+                } catch (err) {
+                    console.error("Error fetching classes:", err);
+                } finally {
+                    setLoadingClasses(false);
+                }
+            };
+            fetchClasses();
+        }
+    }, [entityDialog?.label]);
+
+    const openEntityDialog = (label, addPath, managePath) => {
+        setShowPicMenu(false);
+        setEntityDialog({ label, addPath, managePath, step: 'action' });
+    };
 
     const handlePicClick = (e) => {
         e.stopPropagation();
@@ -189,15 +216,47 @@ const Sidebar = ({ showMobileSidebar, onHideMobileSidebar }) => {
                 {navLink('/dashboard', 'bi-grid-1x2-fill', 'Dashboard')}
                 {navLink('/announcements', 'bi-megaphone-fill', 'Announcements')}
 
-                {/* Role-Based Links (Admin Only) */}
                 {(role?.toLowerCase() === 'admin') && (
                     <>
                         <div className="text-uppercase text-secondary x-small fw-bold mt-4 mb-2 ps-2" style={{ fontSize: '0.7rem', letterSpacing: '1px' }}>
                             Management
                         </div>
                         {navLink('/manage-users', 'bi-people-fill', 'Users Hub')}
-                        {navLink('/manage-students', 'bi-person-badge-fill', 'Students')}
-                        {navLink('/manage-teachers', 'bi-person-workspace', 'Teachers')}
+
+                        {/* Students — opens action dialog */}
+                        <Nav.Link
+                            onClick={() => openEntityDialog('Students', '/manage-students', '/manage-students')}
+                            className={`d-flex align-items-center px-4 py-3 mb-2 rounded-3 text-white transition-all ${
+                                location.pathname === '/manage-students' ? 'bg-primary shadow-lg active' : 'opacity-75 hover-bg-dark'
+                            }`}
+                            style={{ cursor: 'pointer', transition: 'all 0.3s' }}
+                        >
+                            <i className="bi bi-person-badge-fill me-3 fs-5"></i>
+                            <span className="fw-medium">Students</span>
+                        </Nav.Link>
+
+                        {/* Teachers — opens action dialog */}
+                        <Nav.Link
+                            onClick={() => openEntityDialog('Teachers', '/manage-users', '/manage-teachers')}
+                            className={`d-flex align-items-center px-4 py-3 mb-2 rounded-3 text-white transition-all ${
+                                location.pathname === '/manage-teachers' ? 'bg-primary shadow-lg active' : 'opacity-75 hover-bg-dark'
+                            }`}
+                            style={{ cursor: 'pointer', transition: 'all 0.3s' }}
+                        >
+                            <i className="bi bi-person-workspace me-3 fs-5"></i>
+                            <span className="fw-medium">Teachers</span>
+                        </Nav.Link>
+
+                        {/* Parents — opens action dialog (shares ManageStudents page) */}
+                        <Nav.Link
+                            onClick={() => openEntityDialog('Parents', '/manage-students', '/manage-students')}
+                            className="d-flex align-items-center px-4 py-3 mb-2 rounded-3 text-white transition-all opacity-75 hover-bg-dark"
+                            style={{ cursor: 'pointer', transition: 'all 0.3s' }}
+                        >
+                            <i className="bi bi-people me-3 fs-5"></i>
+                            <span className="fw-medium">Parents</span>
+                        </Nav.Link>
+
                         {navLink('/manage-classes', 'bi-building-fill', 'Classes')}
                         {navLink('/manage-fees', 'bi-cash-coin', 'Manage Fees')}
                     </>
@@ -244,8 +303,8 @@ const Sidebar = ({ showMobileSidebar, onHideMobileSidebar }) => {
         <>
             {/* Desktop Static Sidebar */}
             <div
-                className="bg-dark vh-100 d-none d-md-flex flex-column shadow flex-shrink-0"
-                style={{ width: '280px', position: 'sticky', top: 0 }}
+                className="bg-dark d-none d-md-flex flex-column shadow flex-shrink-0"
+                style={{ width: '280px', position: 'fixed', top: 0, left: 0, height: '100vh', overflowY: 'auto', zIndex: 1050 }}
                 onClick={() => setShowPicMenu(false)}
             >
                 {sidebarContent}
@@ -264,6 +323,113 @@ const Sidebar = ({ showMobileSidebar, onHideMobileSidebar }) => {
                     to   { opacity: 1; transform: translateY(0); }
                 }
             `}</style>
+
+            {/* Entity Action Dialog */}
+            <Modal
+                show={!!entityDialog}
+                onHide={() => setEntityDialog(null)}
+                centered
+                size="sm"
+            >
+                {entityDialog && (
+                    <>
+                        <Modal.Header closeButton className="border-0 pb-0">
+                            <Modal.Title className="fw-bold fs-5">
+                                <i className={`bi ${entityDialog.step === 'class' ? 'bi-filter-circle-fill' : 'bi-grid-3x3-gap-fill'} me-2 text-primary`}></i>
+                                {entityDialog.step === 'class' ? `Select Class` : entityDialog.label}
+                            </Modal.Title>
+                        </Modal.Header>
+                        <Modal.Body className="px-4 pb-4 pt-2">
+                            {entityDialog.step === 'action' ? (
+                                <>
+                                    <p className="text-muted small mb-4">What would you like to do?</p>
+                                    <div className="d-flex flex-column gap-3">
+                                        <Button
+                                            variant="primary"
+                                            className="rounded-3 py-3 fw-bold d-flex align-items-center gap-3 shadow-sm"
+                                            onClick={() => {
+                                                const path = entityDialog.addPath;
+                                                setEntityDialog(null);
+                                                navigate(path, { state: { email, role, uname, openAdd: true } });
+                                            }}
+                                        >
+                                            <div className="bg-white bg-opacity-25 rounded-2 p-2 d-flex align-items-center justify-content-center" style={{ width: '36px', height: '36px' }}>
+                                                <i className="bi bi-person-plus-fill fs-5"></i>
+                                            </div>
+                                            <div className="text-start">
+                                                <div>Add New</div>
+                                                <div className="fw-normal opacity-75" style={{ fontSize: '0.75rem' }}>Register a new {entityDialog.label.slice(0, -1)}</div>
+                                            </div>
+                                        </Button>
+                                        <Button
+                                            variant="outline-primary"
+                                            className="rounded-3 py-3 fw-bold d-flex align-items-center gap-3"
+                                            onClick={() => {
+                                                if (entityDialog.label === 'Teachers') {
+                                                    setEntityDialog(null);
+                                                    navigate(entityDialog.managePath, { state: { email, role, uname } });
+                                                } else {
+                                                    // For Students/Parents, proceed to class selection
+                                                    setEntityDialog(prev => ({ ...prev, step: 'class' }));
+                                                }
+                                            }}
+                                        >
+                                            <div className="rounded-2 p-2 d-flex align-items-center justify-content-center" style={{ width: '36px', height: '36px', background: '#e8f0fe' }}>
+                                                <i className="bi bi-list-ul fs-5"></i>
+                                            </div>
+                                            <div className="text-start">
+                                                <div>Manage Existing</div>
+                                                <div className="fw-normal text-muted" style={{ fontSize: '0.75rem' }}>View & edit all {entityDialog.label}</div>
+                                            </div>
+                                        </Button>
+                                    </div>
+                                </>
+                            ) : (
+                                <>
+                                    <p className="text-muted small mb-3">Which class would you like to view?</p>
+                                    {loadingClasses ? (
+                                        <div className="text-center py-4">
+                                            <Spinner animation="border" variant="primary" size="sm" />
+                                            <p className="mt-2 small text-muted">Loading classes...</p>
+                                        </div>
+                                    ) : classes.length === 0 ? (
+                                        <div className="text-center py-3">
+                                            <p className="small text-warning mb-3">No classes found in records.</p>
+                                            <Button variant="secondary" size="sm" onClick={() => setEntityDialog(prev => ({ ...prev, step: 'action' }))}>Back</Button>
+                                        </div>
+                                    ) : (
+                                        <div className="d-flex flex-column gap-2" style={{ maxHeight: '250px', overflowY: 'auto' }}>
+                                            {classes.map(cls => (
+                                                <Button
+                                                    key={cls}
+                                                    variant="light"
+                                                    className="text-start border-0 py-2 px-3 rounded-3 hover-bg-primary-subtle"
+                                                    onClick={() => {
+                                                        const path = entityDialog.managePath;
+                                                        setEntityDialog(null);
+                                                        navigate(path, { state: { email, role, uname, classFilter: cls } });
+                                                    }}
+                                                >
+                                                    <i className="bi bi-arrow-right-short me-2 text-primary"></i>
+                                                    Class {cls}
+                                                </Button>
+                                            ))}
+                                            <hr className="my-2 opacity-10" />
+                                            <Button
+                                                variant="link"
+                                                className="text-decoration-none text-muted small p-0 fw-bold"
+                                                onClick={() => setEntityDialog(prev => ({ ...prev, step: 'action' }))}
+                                            >
+                                                <i className="bi bi-chevron-left me-1"></i>Back
+                                            </Button>
+                                        </div>
+                                    )}
+                                </>
+                            )}
+                        </Modal.Body>
+                    </>
+                )}
+            </Modal>
         </>
     );
 };

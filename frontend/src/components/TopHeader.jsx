@@ -8,25 +8,32 @@ const TopHeader = ({ onToggleSidebar }) => {
     const checkUnreadAnnouncements = async () => {
         try {
             const email = localStorage.getItem('userEmail');
-            if(!email) return;
+            const role = localStorage.getItem('userRole') || '';
+            if (!email) return;
 
-            const res = await fetch('http://localhost:8080/api/announcements');
-            if(res.ok) {
+            const res = await fetch(`http://localhost:8080/api/announcements?role=${role.toLowerCase()}`);
+            if (res.ok) {
                 const data = await res.json();
                 // Filter announcements where current user's email is NOT in readBy array
                 const unread = data.filter(a => !a.readBy || !a.readBy.includes(email));
                 setUnreadCount(unread.length);
             }
-        } catch(error) {
+        } catch (error) {
             console.error("Failed to fetch announcements for notification bell", error);
         }
-    }
+    };
 
     useEffect(() => {
         checkUnreadAnnouncements();
-        // Optional: Set up an interval to poll for new announcements every 30 seconds
+        // Listen for the announcements-read event dispatched by Announcements.jsx
+        const handleRead = () => setUnreadCount(0);
+        window.addEventListener('announcements-read', handleRead);
+        // Poll every 30 seconds for new announcements
         const intervalId = setInterval(checkUnreadAnnouncements, 30000);
-        return () => clearInterval(intervalId);
+        return () => {
+            clearInterval(intervalId);
+            window.removeEventListener('announcements-read', handleRead);
+        };
     }, []);
 
     const handleLogout = () => {
@@ -34,19 +41,36 @@ const TopHeader = ({ onToggleSidebar }) => {
         navigate('/');
     };
 
+    // Clear the badge immediately when the user clicks the bell, then navigate
+    const handleBellClick = async () => {
+        const email = localStorage.getItem('userEmail');
+        setUnreadCount(0); // instant visual clear
+        if (email) {
+            try {
+                await fetch('http://localhost:8080/api/announcements/mark-all-read', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email })
+                });
+            } catch (_) { /* silent */ }
+        }
+        window.dispatchEvent(new Event('announcements-read'));
+        navigate('/announcements');
+    };
+
     return (
         <div className="px-3 py-2 sticky-top" style={{ zIndex: 1000 }}>
-            <div 
-                className="rounded-pill px-4 py-2 d-flex justify-content-between align-items-center shadow-sm border border-light" 
-                style={{ 
-                    background: 'linear-gradient(to right, #e0e7ff, #ffffff)', 
-                    maxWidth: '1200px', 
-                    margin: '0 auto' 
+            <div
+                className="rounded-pill px-4 py-2 d-flex justify-content-between align-items-center shadow-sm border border-light"
+                style={{
+                    background: 'linear-gradient(to right, #e0e7ff, #ffffff)',
+                    maxWidth: '1200px',
+                    margin: '0 auto'
                 }}
             >
                 <div className="d-flex align-items-center">
-                    <button 
-                        className="btn btn-light d-md-none me-2 rounded-circle shadow-sm border d-flex align-items-center justify-content-center" 
+                    <button
+                        className="btn btn-light d-md-none me-2 rounded-circle shadow-sm border d-flex align-items-center justify-content-center"
                         onClick={onToggleSidebar}
                         style={{ width: '40px', height: '40px' }}
                     >
@@ -55,9 +79,9 @@ const TopHeader = ({ onToggleSidebar }) => {
                 </div>
 
                 <div className="d-flex align-items-center gap-4">
-                    <div 
-                        className="position-relative cursor-pointer" 
-                        onClick={() => navigate('/announcements')} 
+                    <div
+                        className="position-relative cursor-pointer"
+                        onClick={handleBellClick}
                         style={{ cursor: 'pointer' }}
                         title="View Announcements"
                     >
@@ -86,3 +110,4 @@ const TopHeader = ({ onToggleSidebar }) => {
 };
 
 export default TopHeader;
+
