@@ -274,50 +274,75 @@ const ManageStudents = () => {
     const initialStudents = [
         {
             id: '1',
-            studentName: 'John Doe',
+            studentName: 'Abdul Basit',
             studentAge: '14',
             studentRollNo: '2024-001',
             studentGender: 'Male',
-            studentClass: '8th Grade',
-            studentEmail: 'john.doe@student.edu',
+            studentClass: '5th Grade',
+            studentEmail: 'abdul@gmail.com',
             studentPassword: '',
-            studentProfilePicture: 'https://randomuser.me/api/portraits/men/1.jpg',
-            parentName: 'Michael Doe',
-            parentPhone: '+1 234 567 8901',
-            parentEmail: 'michael.doe@parent.edu',
+            studentProfilePicture: '',
+            parentName: 'Khalid Mehmood',
+            parentPhone: '03245627336',
+            parentEmail: 'khalid@gmail.com',
             parentPassword: '',
-            parentAddress: '123 Elm Street, Cityville',
-            parentProfilePicture: 'https://randomuser.me/api/portraits/men/2.jpg'
+            parentAddress: 'House 14, Street 3, Mohalla Qadirabad, Multan',
+            parentProfilePicture: ''
         },
         {
             id: '2',
-            studentName: 'Jane Smith',
+            studentName: 'M Muntaha',
             studentAge: '13',
             studentRollNo: '2024-002',
-            studentGender: 'Female',
-            studentClass: '7th Grade',
-            studentEmail: 'jane.smith@student.edu',
+            studentGender: 'Male',
+            studentClass: '4th Grade',
+            studentEmail: 'muntaha@gmail.com',
             studentPassword: '',
-            studentProfilePicture: 'https://randomuser.me/api/portraits/women/1.jpg',
-            parentName: 'Sarah Smith',
-            parentPhone: '+1 987 654 3210',
-            parentEmail: 'sarah.smith@parent.edu',
+            studentProfilePicture: '',
+            parentName: 'Tariq Hussain',
+            parentPhone: '03017894523',
+            parentEmail: 'tariq@gmail.com',
             parentPassword: '',
-            parentAddress: '456 Oak Ave, Townsville',
-            parentProfilePicture: 'https://randomuser.me/api/portraits/women/2.jpg'
+            parentAddress: 'Gali Masjid Wali, Bahawalpur',
+            parentProfilePicture: ''
+        },
+        {
+            id: '3',
+            studentName: 'M Sharafat',
+            studentAge: '15',
+            studentRollNo: '2024-003',
+            studentGender: 'Male',
+            studentClass: '5th Grade',
+            studentEmail: 'sharafat@gmail.com',
+            studentPassword: '',
+            studentProfilePicture: '',
+            parentName: 'Nawaz Ahmed',
+            parentPhone: '03129876543',
+            parentEmail: 'nawaz@gmail.com',
+            parentPassword: '',
+            parentAddress: 'Mohalla Ahmedpur, Near Jamia Masjid, Rahim Yar Khan',
+            parentProfilePicture: ''
+        },
+        {
+            id: '4',
+            studentName: 'M Qasim',
+            studentAge: '12',
+            studentRollNo: '2024-004',
+            studentGender: 'Male',
+            studentClass: '3rd Grade',
+            studentEmail: 'qasim@gmail.com',
+            studentPassword: '',
+            studentProfilePicture: '',
+            parentName: 'Aslam Shah',
+            parentPhone: '03001234567',
+            parentEmail: 'aslam@gmail.com',
+            parentPassword: '',
+            parentAddress: 'House 22, Gulshan Colony, Lahore',
+            parentProfilePicture: ''
         }
     ];
 
     const [students, setStudents] = useState(initialStudents);
-    const [searchTerm, setSearchTerm] = useState('');
-
-    const filteredStudents = students.filter(s => {
-        const matchesClass = !classFilter || (s.studentClass === classFilter || s.classNo === classFilter);
-        const matchesSearch = !searchTerm || 
-            s.studentName.toLowerCase().includes(searchTerm.toLowerCase()) || 
-            (s.studentRollNo && s.studentRollNo.toString().toLowerCase().includes(searchTerm.toLowerCase()));
-        return matchesClass && matchesSearch;
-    });
 
     const [formData, setFormData] = useState({
         studentName: '',
@@ -365,22 +390,25 @@ const ManageStudents = () => {
         setError(null);
 
         try {
-            // Disabled hitting the endpoint
-            // await Axios.post('http://localhost:8080/api/register-student-parent', formData);
+            // Call the backend API to register student + parent in DB
+            await Axios.post('http://localhost:8080/students', formData);
 
-            // Simulating network delay and using local state
-            setTimeout(() => {
-                setStudents(prev => [...prev, { ...formData, id: Date.now().toString() }]);
-                setShowSuccessModal(true);
-                setFormData({
-                    studentName: '', studentAge: '', studentRollNo: '', studentGender: '', studentClass: '',
-                    studentEmail: '', studentPassword: '', studentProfilePicture: '',
-                    parentName: '', parentPhone: '', parentEmail: '', parentPassword: '',
-                    parentAddress: '', parentProfilePicture: ''
-                });
-                setValidated(false);
-                setLoading(false);
-            }, 500);
+            // Also save to localStorage so ManageClasses can pick it up
+            const newStudent = { ...formData, id: Date.now().toString() };
+            setStudents(prev => [...prev, newStudent]);
+            const saved = JSON.parse(localStorage.getItem('addedStudents') || '[]');
+            saved.push(newStudent);
+            localStorage.setItem('addedStudents', JSON.stringify(saved));
+
+            setShowSuccessModal(true);
+            setFormData({
+                studentName: '', studentAge: '', studentRollNo: '', studentGender: '', studentClass: '',
+                studentEmail: '', studentPassword: '', studentProfilePicture: '',
+                parentName: '', parentPhone: '', parentEmail: '', parentPassword: '',
+                parentAddress: '', parentProfilePicture: ''
+            });
+            setValidated(false);
+            setLoading(false);
 
         } catch (err) {
             setError(err.response?.data?.message || "Registration failed. Check if email/roll no already exists.");
@@ -424,18 +452,8 @@ const ManageStudents = () => {
                         </div>
                     </div>
                     <div className="d-flex gap-2 align-items-center">
-                        {classFilter && (
-                            <Button 
-                                variant="outline-danger" 
-                                size="sm" 
-                                className="rounded-pill px-3"
-                                onClick={() => navigate(location.pathname, { state: { email, role, uname } })}
-                            >
-                                <i className="bi bi-x-circle me-1"></i> Clear Filter
-                            </Button>
-                        )}
                         <Badge bg="primary" className="p-2 px-3 rounded-pill shadow-sm">
-                            Showing: {filteredStudents.length} / {students.length}
+                            Total Students: {students.length}
                         </Badge>
                     </div>
                 </div>
@@ -475,19 +493,26 @@ const ManageStudents = () => {
                                                 <Col md={6}>
                                                     <Form.Group className="mb-3">
                                                         <Form.Label className="small fw-bold">Age</Form.Label>
-                                                        <Form.Control required type="number" name="studentAge" value={formData.studentAge} onChange={handleChange} placeholder="e.g. 15" />
+                                                        <Form.Control required type="number" name="studentAge" max="15" title="Age cannot exceed 15" value={formData.studentAge} onChange={handleChange} placeholder="e.g. 15" />
                                                     </Form.Group>
                                                 </Col>
                                                 <Col md={6}>
                                                     <Form.Group className="mb-3">
-                                                        <Form.Label className="small fw-bold">Class / Grade</Form.Label>
-                                                        <Form.Control required name="studentClass" value={formData.studentClass} onChange={handleChange} placeholder="e.g. 10th Grade" />
+                                                        <Form.Label className="small fw-bold">Class</Form.Label>
+                                                        <Form.Select required name="studentClass" value={formData.studentClass} onChange={handleChange}>
+                                                            <option value="">Select Class...</option>
+                                                            <option>Class 1</option>
+                                                            <option>Class 2</option>
+                                                            <option>Class 3</option>
+                                                            <option>Class 4</option>
+                                                            <option>Class 5</option>
+                                                        </Form.Select>
                                                     </Form.Group>
                                                 </Col>
                                             </Row>
                                             <Form.Group className="mb-3">
                                                 <Form.Label className="small fw-bold">Login Email</Form.Label>
-                                                <Form.Control required type="email" name="studentEmail" value={formData.studentEmail} onChange={handleChange} />
+                                                <Form.Control required type="email" name="studentEmail" pattern="^.*@gmail\.com$" title="Email must end with @gmail.com" value={formData.studentEmail} onChange={handleChange} />
                                             </Form.Group>
                                             <Form.Group className="mb-3">
                                                 <Form.Label className="small fw-bold">Account Password</Form.Label>
@@ -519,11 +544,11 @@ const ManageStudents = () => {
                                             </Form.Group>
                                             <Form.Group className="mb-3">
                                                 <Form.Label className="small fw-bold">Guardian Contact</Form.Label>
-                                                <Form.Control required name="parentPhone" value={formData.parentPhone} onChange={handleChange} />
+                                                <Form.Control required name="parentPhone" pattern="[0-9]{11}" title="Phone number must be exactly 11 digits" value={formData.parentPhone} onChange={handleChange} />
                                             </Form.Group>
                                             <Form.Group className="mb-3">
                                                 <Form.Label className="small fw-bold">Guardian Email (For Notifications)</Form.Label>
-                                                <Form.Control required type="email" name="parentEmail" value={formData.parentEmail} onChange={handleChange} />
+                                                <Form.Control required type="email" name="parentEmail" pattern="^.*@gmail\.com$" title="Email must end with @gmail.com" value={formData.parentEmail} onChange={handleChange} />
                                             </Form.Group>
                                             <Form.Group className="mb-3">
                                                 <Form.Label className="small fw-bold">Guardian Password</Form.Label>
@@ -556,89 +581,6 @@ const ManageStudents = () => {
                                         </Button>
                                     </div>
                                 </Form>
-                            </Card.Body>
-                        </Card>
-                    </Col>
-
-                    {/* Registrations List Table */}
-                    <Col lg={12}>
-                        <Card className="border-0 shadow-sm rounded-4">
-                            <Card.Body className="p-0">
-                                <div className="p-4 border-bottom d-flex justify-content-between align-items-center bg-white rounded-top-4">
-                                    <h5 className="fw-bold mb-0">Student Directory {classFilter && <span className="text-primary">— Class {classFilter}</span>}</h5>
-                                    <div className="d-flex gap-2" style={{ width: '300px' }}>
-                                        <div className="input-group input-group-sm">
-                                            <span className="input-group-text bg-light border-0">
-                                                <i className="bi bi-search text-muted"></i>
-                                            </span>
-                                            <Form.Control
-                                                type="text"
-                                                placeholder="Search by name or roll no..."
-                                                className="bg-light border-0 shadow-none"
-                                                value={searchTerm}
-                                                onChange={(e) => setSearchTerm(e.target.value)}
-                                            />
-                                            {searchTerm && (
-                                                <Button 
-                                                    variant="light" 
-                                                    className="border-0 bg-light"
-                                                    onClick={() => setSearchTerm('')}
-                                                >
-                                                    <i className="bi bi-x"></i>
-                                                </Button>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="table-responsive">
-                                    <Table hover className="align-middle mb-0 custom-table" ref={listRef}>
-                                        <thead className="bg-light">
-                                            <tr>
-                                                <th className="ps-4">Student Name</th>
-                                                <th>Roll No</th>
-                                                <th>Parent Name</th>
-                                                <th>Contact</th>
-                                                <th className="text-end pe-4">Status</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {filteredStudents.length > 0 ? filteredStudents.map((s, idx) => (
-                                                <tr key={idx}>
-                                                    <td className="ps-4">
-                                                        <div className="d-flex align-items-center">
-                                                            {s.studentProfilePicture ? (
-                                                                <img src={s.studentProfilePicture} alt="profile" className="rounded-circle me-3 border" style={{ width: '40px', height: '40px', objectFit: 'cover' }} />
-                                                            ) : (
-                                                                <div className="bg-success bg-opacity-10 text-success rounded-circle p-2 me-3 fw-bold d-flex justify-content-center align-items-center" style={{ width: '40px', height: '40px' }}>
-                                                                    {s.studentName.charAt(0)}
-                                                                </div>
-                                                            )}
-                                                            <div>
-                                                                <span className="fw-bold d-block">{s.studentName}</span>
-                                                                <span className="text-muted small">{s.studentEmail}</span>
-                                                            </div>
-                                                        </div>
-                                                    </td>
-                                                    <td>
-                                                        <Badge bg="secondary" className="mb-1 d-block w-75">{s.studentRollNo}</Badge>
-                                                        <span className="small text-muted">{s.studentClass || '-'}</span>
-                                                    </td>
-                                                    <td>{s.parentName}</td>
-                                                    <td>{s.parentPhone}</td>
-                                                    <td className="text-end pe-4">
-                                                        <Badge bg="success" className="bg-opacity-10 text-success">Active</Badge>
-                                                    </td>
-                                                </tr>
-                                            )) : (
-                                                <tr>
-                                                    <td colSpan="5" className="text-center py-5 text-muted">
-                                                        No records found for Class {classFilter || 'selected'}.
-                                                    </td>
-                                                </tr>
-                                            )}
-                                        </tbody>
-                                    </Table>
-                                </div>
                             </Card.Body>
                         </Card>
                     </Col>

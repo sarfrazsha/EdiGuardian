@@ -202,22 +202,32 @@ const ManageTeachers = () => {
     const initialTeachers = [
         {
             _id: '1',
-            teacherName: 'Alice Smith',
-            email: 'alice.smith@school.edu',
-            subject: 'Mathematics',
-            phoneNumber: '+1 123 456 7890',
-            address: '123 Math Lane',
-            profilePicture: 'https://randomuser.me/api/portraits/women/44.jpg',
+            teacherName: 'Respected Naeem Akhter',
+            email: 'naeem@gmail.com',
+            subject: 'Class Incharge Class 1',
+            phoneNumber: '03245627336',
+            address: 'House 12, Street 5, Mohalla Qadirabad, Multan',
+            profilePicture: '',
             role: 'Teacher'
         },
         {
             _id: '2',
-            teacherName: 'Bob Jones',
-            email: 'bob.jones@school.edu',
-            subject: 'Science',
-            phoneNumber: '+1 098 765 4321',
-            address: '456 Science Blvd',
-            profilePicture: 'https://randomuser.me/api/portraits/men/32.jpg',
+            teacherName: 'Respected Saleem Akhter',
+            email: 'saleem@gmail.com',
+            subject: 'Class Incharge Class 2',
+            phoneNumber: '03017894523',
+            address: 'House 8, Gali Masjid Wali, Bahawalpur',
+            profilePicture: '',
+            role: 'Teacher'
+        },
+        {
+            _id: '3',
+            teacherName: 'Respected Qari Illyas Shb',
+            email: 'illyas@gmail.com',
+            subject: 'Class Incharge Class 3',
+            phoneNumber: '03129876543',
+            address: 'Mohalla Ahmedpur, Near Jamia Masjid, Rahim Yar Khan',
+            profilePicture: '',
             role: 'Teacher'
         }
     ];
@@ -409,6 +419,8 @@ const ManageTeachers = () => {
                             <Form.Control
                                 type="email"
                                 required
+                                pattern="^.*@gmail\.com$"
+                                title="Email must end with @gmail.com"
                                 value={formData.email}
                                 onChange={e => setFormData({ ...formData, email: e.target.value })}
                             />
@@ -437,8 +449,10 @@ const ManageTeachers = () => {
                             <Form.Label className="small fw-bold">Phone Number</Form.Label>
                             <Form.Control
                                 required
+                                pattern="[0-9]{11}"
+                                title="Phone number must be exactly 11 digits"
                                 value={formData.phoneNumber}
-                                placeholder="e.g. +1 234 567 890"
+                                placeholder="e.g. 03001234567"
                                 onChange={e => setFormData({ ...formData, phoneNumber: e.target.value })}
                             />
                         </Form.Group>

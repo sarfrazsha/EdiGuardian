@@ -14,10 +14,11 @@ const Student = new schema(
         },
         studentAge: {
             type: Number,
-            required: true
+            required: true,
+            max: [15, 'Age cannot exceed 15']
         },
         studentRollNo: {
-            type: Number,
+            type: String,
             required: true
         },
         studentGender: {
@@ -26,7 +27,8 @@ const Student = new schema(
         },
         studentEmail: {
             type: String,
-            required: true
+            required: true,
+            match: [/^.*@gmail\.com$/, 'Email must end with @gmail.com']
         },
         studentPassword: {
             type: String,

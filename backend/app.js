@@ -93,41 +93,43 @@ app.get("/api/classes", async (req, res) => {
     }
 });
 app.post("/students", async (req, res) => {
-    let { studentName, studentAge, studentRollNo, studentGender, studentEmail, studentPassword, studentRole, parentName, parentPhone, parentAddress, parentEmail, parentPassword, parentRole } = req.body;
-    const student = new Student({
-        studentId: uuidv4(),
-        studentName: studentName,
-        studentAge: studentAge,
-        studentRollNo: studentRollNo,
-        studentGender: studentGender,
-        studentEmail: studentEmail,
-        studentPassword: studentPassword,
-        studentRole: 'student'
-    });
-    let savedStudent = await student.save();
+    try {
+        let { studentName, studentAge, studentRollNo, studentGender, studentEmail, studentPassword, studentClass, parentName, parentPhone, parentAddress, parentEmail, parentPassword } = req.body;
+        const student = new Student({
+            studentId: uuidv4(),
+            classNo: studentClass || '',
+            studentName: studentName,
+            studentAge: studentAge,
+            studentRollNo: studentRollNo,
+            studentGender: studentGender,
+            studentEmail: studentEmail,
+            studentPassword: studentPassword,
+            studentRole: 'student'
+        });
+        let savedStudent = await student.save();
 
+        const parent = new Parent({
+            parentId: uuidv4(),
+            studentId: savedStudent.studentId,
+            classNo: studentClass || '',
+            parentName: parentName,
+            parentPhone: parentPhone,
+            parentAddress: parentAddress,
+            parentEmail: parentEmail,
+            parentPassword: parentPassword,
+            parentRole: 'parent'
+        });
+        let savedParent = await parent.save();
 
-
-    const parent = new Parent({
-        parentId: uuidv4(),
-        studentId: savedStudent.studentId,
-        parentName: parentName,
-        parentPhone: parentPhone,
-        parentAddress: parentAddress,
-        parentEmail: parentEmail,
-        parentPassword: parentPassword,
-        parentRole: 'parent'
-    })
-
-    await parent.save();
-
-
-    res.status(201).json({
-        message: "Student and Parent data saved successfully!",
-
-
-
-    })
+        res.status(201).json({
+            message: "Student and Parent data saved successfully!",
+            student: savedStudent,
+            parent: savedParent
+        });
+    } catch (err) {
+        console.error("Error registering student/parent:", err);
+        res.status(500).json({ message: err.message || "Registration failed." });
+    }
 })
 // 
 // 

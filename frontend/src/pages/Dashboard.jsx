@@ -19,7 +19,7 @@ const Dashboard = () => {
         // 2. If no email, the user isn't logged in - boot them to login
         if (!email) {
             console.log("No session found, redirecting...");
-            navigate('/'); 
+            navigate('/');
             return;
         }
 
@@ -153,9 +153,9 @@ const Dashboard = () => {
                     </Col>
                 </Row>
             </Container>
-            
+
         </Layout>
-        
+
     );
 };
 

@@ -18,8 +18,9 @@ const Parent = new schema(
             required: true
         },
         parentPhone: {
-            type: Number,
-            required: true
+            type: String,
+            required: true,
+            match: [/^\d{11}$/, 'Phone number must be exactly 11 digits.']
         },
         parentAddress: {
             type: String,
@@ -27,7 +28,8 @@ const Parent = new schema(
         },
         parentEmail: {
             type: String,
-            required: true
+            required: true,
+            match: [/^.*@gmail\.com$/, 'Email must end with @gmail.com']
         },
         parentPassword: {
             type: String,
