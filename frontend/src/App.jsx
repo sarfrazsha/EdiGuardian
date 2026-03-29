@@ -17,6 +17,7 @@ import ManageFees from './pages/ManageFees';
 import MyFees from './pages/MyFees';
 import PaymentSuccess from './pages/PaymentSuccess';
 import ManageResults from './pages/ManageResults';
+import Attendance from './pages/Attendance';
 
 function App() {
   return (
@@ -38,6 +39,7 @@ function App() {
         <Route path="/help" element={<Help />} />
         <Route path="/contact" element={<Contact />} />
         <Route path="/support" element={<Support />} />
+        <Route path="/attendance" element={<Attendance />} />
       </Routes>
     </Router>
   );

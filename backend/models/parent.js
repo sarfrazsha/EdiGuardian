@@ -4,8 +4,8 @@ const schema = mongoose.Schema;
 const Parent = new schema(
     {
         studentId: {
-            type: String,
-            ref: 'student'
+            type: mongoose.Schema.Types.ObjectId,
+            ref:'student'
         },
         parentId: {
             type: String
@@ -35,7 +35,7 @@ const Parent = new schema(
             type: String,
             required: true
         },
-        parentRole: String
+        
     }
 )
 

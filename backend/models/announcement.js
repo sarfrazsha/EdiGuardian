@@ -16,7 +16,7 @@ const announcementSchema = new mongoose.Schema({
     },
     expiresAt: {
         type: Date,
-        default: null, // null = never expires
+        default: null, 
     },
     readBy: {
         type: [String],

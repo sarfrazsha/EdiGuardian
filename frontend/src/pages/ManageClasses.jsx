@@ -23,6 +23,7 @@ const ManageClasses = () => {
             studentGender: 'Male',
             studentClass: 'Class 1',
             studentEmail: 'abdul@gmail.com',
+            studentPassword: 'password123',
             studentProfilePicture: '',
             parentName: 'Khalid Mehmood',
             parentPhone: '03245627336',
@@ -528,10 +529,16 @@ const ManageClasses = () => {
                                                     <Form.Control type="text" className="p-2 bg-light border-0 rounded-3" value={editingStudentData.studentName} onChange={(e) => setEditingStudentData({ ...editingStudentData, studentName: e.target.value })} />
                                                 </Form.Group>
                                             </Col>
-                                            <Col md={6}>
+                                             <Col md={6}>
                                                 <Form.Group>
                                                     <Form.Label className="small fw-bold text-secondary text-uppercase ls-1">Email</Form.Label>
                                                     <Form.Control type="email" className="p-2 bg-light border-0 rounded-3" value={editingStudentData.studentEmail} onChange={(e) => setEditingStudentData({ ...editingStudentData, studentEmail: e.target.value })} />
+                                                </Form.Group>
+                                            </Col>
+                                            <Col md={6}>
+                                                <Form.Group>
+                                                    <Form.Label className="small fw-bold text-secondary text-uppercase ls-1">Password</Form.Label>
+                                                    <Form.Control type="text" className="p-2 bg-light border-0 rounded-3" value={editingStudentData.studentPassword || ''} onChange={(e) => setEditingStudentData({ ...editingStudentData, studentPassword: e.target.value })} />
                                                 </Form.Group>
                                             </Col>
                                             <Col md={4}>
@@ -593,6 +600,11 @@ const ManageClasses = () => {
                                                     <Col xs={6}>
                                                         <p className="text-muted small mb-1 text-uppercase ls-1 fw-semibold">Gender</p>
                                                         <p className="mb-0 fw-bold text-dark fs-5">{selectedStudent.studentGender}</p>
+                                                    </Col>
+                                                    <Col xs={12}>
+                                                        <p className="text-muted small mb-1 text-uppercase ls-1 fw-semibold">Student Credentials</p>
+                                                        <p className="mb-1 text-dark fw-medium small"><i className="bi bi-envelope me-2"></i>{selectedStudent.studentEmail}</p>
+                                                        <p className="mb-0 text-dark fw-medium small"><i className="bi bi-key me-2"></i>{selectedStudent.studentPassword || '********'}</p>
                                                     </Col>
                                                 </Row>
                                             </div>

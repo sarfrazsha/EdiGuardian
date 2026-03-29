@@ -3,7 +3,7 @@ const schema = mongoose.Schema;
 
 const Admin = new schema(
     {
-        adminId:String,
+      
         adminName:{
             type: String,
             required:true

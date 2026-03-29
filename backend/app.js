@@ -17,6 +17,7 @@ const Teacher = require('./models/teacher');
 const Student = require("./models/student");
 const Announcement = require("./models/announcement");
 const Fee = require("./models/fee");
+const Attendance = require("./models/attendance");
 
 // app.set("view engine", "ejs");
 // app.set("views", path.join(__dirname, "views"));
@@ -173,13 +174,23 @@ app.post("/student/login", async (req, res) => {
         }
 
         if (dbPassword === password) {
-
-            return res.status(201).json({
+            const responseData = {
                 message: "Logged in Successfully!",
                 email: email,
                 role: role,
                 uname: uname
-            });
+            };
+
+            // Add role-specific data to login response
+            if (role === "teacher") {
+                responseData.teacherClass = user.teacherClass;
+            } else if (role === "parent") {
+                responseData.studentId = user.studentId;
+            } else if (role === "student") {
+                responseData.studentId = user.studentId;
+            }
+
+            return res.status(201).json(responseData);
         } else {
             return res.status(400).json({ message: "Wrong Password" });
         }
@@ -466,6 +477,83 @@ app.put("/api/fees/:id/approve", async (req, res) => {
         res.json(updatedFee);
     } catch (err) {
         res.status(500).json({ message: "Error approving fee" });
+    }
+});
+
+// --- Attendance Routes ---
+
+// GET students by class
+app.get("/api/students/class/:classNo", async (req, res) => {
+    try {
+        const { classNo } = req.params;
+        const students = await Student.find({ classNo: classNo }).sort({ studentName: 1 });
+        res.json(students);
+    } catch (err) {
+        res.status(500).json({ message: "Error fetching students for class" });
+    }
+});
+
+// POST mark/update attendance (bulk)
+app.post("/api/attendance", async (req, res) => {
+    try {
+        const { attendanceRecords, date, classNo, markedBy } = req.body;
+        
+        if (!attendanceRecords || !attendanceRecords.length) {
+            return res.status(400).json({ message: "No attendance records provided" });
+        }
+
+        const bulkOps = attendanceRecords.map(record => ({
+            updateOne: {
+                filter: { 
+                    studentId: record.studentId, 
+                    date: new Date(date).setHours(0,0,0,0) 
+                },
+                update: { 
+                    $set: { 
+                        studentName: record.studentName,
+                        classNo: classNo,
+                        status: record.status,
+                        markedBy: markedBy,
+                        date: new Date(date).setHours(0,0,0,0)
+                    } 
+                },
+                upsert: true
+            }
+        }));
+
+        await Attendance.bulkWrite(bulkOps);
+        res.json({ message: "Attendance marked successfully" });
+    } catch (err) {
+        console.error("Attendance save error:", err);
+        res.status(500).json({ message: "Error marking attendance" });
+    }
+});
+
+// GET attendance for a class on a specific date
+app.get("/api/attendance/class/:classNo", async (req, res) => {
+    try {
+        const { classNo } = req.params;
+        const { date } = req.query;
+        const searchDate = new Date(date).setHours(0,0,0,0);
+        
+        const records = await Attendance.find({ 
+            classNo: classNo, 
+            date: searchDate 
+        });
+        res.json(records);
+    } catch (err) {
+        res.status(500).json({ message: "Error fetching attendance records" });
+    }
+});
+
+// GET attendance history for a student
+app.get("/api/attendance/student/:studentId", async (req, res) => {
+    try {
+        const { studentId } = req.params;
+        const records = await Attendance.find({ studentId: studentId }).sort({ date: -1 });
+        res.json(records);
+    } catch (err) {
+        res.status(500).json({ message: "Error fetching student attendance history" });
     }
 });
 

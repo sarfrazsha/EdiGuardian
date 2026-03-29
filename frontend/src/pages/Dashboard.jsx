@@ -8,7 +8,8 @@ const Dashboard = () => {
     const [announcements, setAnnouncements] = useState([]);
     const [adminStats, setAdminStats] = useState({ students: 0, teachers: 0, classes: 0 });
     const [isLoading, setIsLoading] = useState(true);
-    const [userData, setUserData] = useState({ name: '', role: '', email: '' });
+    const [userData, setUserData] = useState({ name: '', role: '', email: '', studentId: '' });
+    const [todayAttendance, setTodayAttendance] = useState(null);
 
     useEffect(() => {
         // 1. Extract session data from localStorage
@@ -24,7 +25,7 @@ const Dashboard = () => {
         }
 
         // 3. Set user data to state
-        setUserData({ name, role, email });
+        setUserData({ name, role, email, studentId: localStorage.getItem('studentId') || '' });
 
         // 4. Fetch Announcements from backend (filtered by role)
         fetch(`http://localhost:8080/api/announcements?role=${(role || '').toLowerCase()}`)
@@ -36,7 +37,21 @@ const Dashboard = () => {
                 console.error("Fetch announcements error:", err);
             });
 
-        // 5. Fetch dashboard stats if admin
+        // 5. Fetch attendance if parent or student
+        const sid = localStorage.getItem('studentId');
+        if (sid && (role?.toLowerCase() === 'parent' || role?.toLowerCase() === 'student')) {
+            const today = new Date().toISOString().split('T')[0];
+            fetch(`http://localhost:8080/api/attendance/student/${sid}`)
+                .then(res => res.json())
+                .then(data => {
+                    // Find record for today
+                    const todayRec = data.find(r => new Date(r.date).toISOString().split('T')[0] === today);
+                    setTodayAttendance(todayRec ? todayRec.status : 'Pending');
+                })
+                .catch(err => console.error("Fetch attendance error:", err));
+        }
+
+        // 6. Fetch dashboard stats if admin
         if (role?.toLowerCase() === 'admin') {
             fetch('http://localhost:8080/users')
                 .then(res => res.json())
@@ -76,7 +91,7 @@ const Dashboard = () => {
             ];
         } else {
             return [
-                { label: 'Attendance', value: '95%', icon: 'bi-calendar-check', color: 'success' },
+                { label: 'Attendance', value: todayAttendance || '95%', icon: 'bi-calendar-check', color: todayAttendance === 'Absent' ? 'danger' : 'success' },
                 { label: 'Current GPA', value: '3.8', icon: 'bi-star', color: 'warning' },
                 { label: 'Course Load', value: '06', icon: 'bi-journal-text', color: 'primary' },
                 { label: 'Library Books', value: '02', icon: 'bi-book-half', color: 'info' }

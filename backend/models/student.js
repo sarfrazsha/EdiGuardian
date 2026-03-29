@@ -6,7 +6,7 @@ const Student = new schema(
 
         studentId: String,
         classNo: {
-            type: String // Class association
+            type: String 
         },
         studentName: {
             type: String,
