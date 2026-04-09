@@ -49,6 +49,17 @@ const ManageResults = () => {
         fetchStudents();
     }, []);
 
+    // Load grades from localStorage when class or exam type changes
+    useEffect(() => {
+        if (selectedClass && examType) {
+            const allResults = JSON.parse(localStorage.getItem('school_academic_results') || '{}');
+            const classResults = allResults[`${selectedClass}_${examType}`] || {};
+            setGrades(classResults);
+        } else {
+            setGrades({});
+        }
+    }, [selectedClass, examType]);
+
     // Unique classes from students
     const classesList = [...new Set(students.map(s => s.classNo).filter(Boolean))].sort();
 
@@ -68,11 +79,17 @@ const ManageResults = () => {
     };
 
     const handleSaveResults = () => {
+        if (!selectedClass || !examType) return;
+        
         setSaving(true);
-        // Simulate API call to save grades
+        // Save to localStorage
+        const allResults = JSON.parse(localStorage.getItem('school_academic_results') || '{}');
+        allResults[`${selectedClass}_${examType}`] = grades;
+        localStorage.setItem('school_academic_results', JSON.stringify(allResults));
+
         setTimeout(() => {
             setSaving(false);
-            setSuccessMsg(`Results for ${selectedClass} successfully published!`);
+            setSuccessMsg(`Results for ${selectedClass} (${examType}) successfully published!`);
             setTimeout(() => setSuccessMsg(''), 3000);
         }, 1200);
     };

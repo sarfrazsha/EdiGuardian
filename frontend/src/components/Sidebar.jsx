@@ -15,10 +15,10 @@ const Sidebar = ({ showMobileSidebar, onHideMobileSidebar }) => {
     const role = location.state?.role || localStorage.getItem('userRole');
     const email = location.state?.email || localStorage.getItem('userEmail');
     const uname = location.state?.uname || localStorage.getItem('userName');
-
-    // Profile picture: stored in localStorage as base64
+    // const image= location.state?.proflie;
+    // Profile picture: stored in localStorage or passed via state
     const [profilePic, setProfilePic] = useState(
-        () => localStorage.getItem('userProfilePic') || DEFAULT_AVATAR
+        () => location.state?.profilePic || localStorage.getItem('userProfilePic') || DEFAULT_AVATAR
     );
     const [showPicMenu, setShowPicMenu] = useState(false);
     // Entity action dialog: { label, addPath, managePath, step: 'action' | 'class' }
@@ -258,7 +258,8 @@ const Sidebar = ({ showMobileSidebar, onHideMobileSidebar }) => {
                         </Nav.Link>
 
                         {navLink('/manage-classes', 'bi-building-fill', 'Classes')}
-                        {navLink('/manage-fees', 'bi-cash-coin', 'Manage Fees')}
+                        {navLink('/issue-fees', 'bi-plus-circle-fill', 'Issue Fees')}
+                        {navLink('/all-fees', 'bi-cash-coin', 'Fee Records')}
                     </>
                 )}
 

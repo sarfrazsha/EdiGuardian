@@ -11,8 +11,12 @@ const announcementSchema = new mongoose.Schema({
     },
     targetAudience: {
         type: String,
-        enum: ['all', 'student', 'parent', 'teacher'],
+        enum: ['all', 'student', 'parent', 'teacher', 'admin'],
         default: 'all',
+    },
+    isAlert: {
+        type: Boolean,
+        default: false,
     },
     expiresAt: {
         type: Date,

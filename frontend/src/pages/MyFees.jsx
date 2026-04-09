@@ -22,17 +22,25 @@ const MyFees = () => {
     // Upload Receipt Modal State
     const [showUploadModal, setShowUploadModal] = useState(false);
     const [selectedFee, setSelectedFee] = useState(null);
-    const [uploadReceiptBase64, setUploadReceiptBase64] = useState('');
+    const [uploadReceiptFile, setUploadReceiptFile] = useState(null);
     const [uploadingReceipt, setUploadingReceipt] = useState(false);
 
-    const downloadBase64File = (base64Data, filename) => {
-        const linkSource = base64Data;
-        const downloadLink = document.createElement("a");
-        downloadLink.href = linkSource;
-        downloadLink.download = filename;
-        document.body.appendChild(downloadLink);
-        downloadLink.click();
-        document.body.removeChild(downloadLink);
+    const downloadFile = async (filename) => {
+        try {
+            const response = await fetch(`http://localhost:8080/uploads/${filename}`);
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', filename.split('/').pop()); // Extract filename from path
+            document.body.appendChild(link);
+            link.click();
+            link.parentNode.removeChild(link);
+            window.URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error("Download failed:", error);
+            alert("Failed to download file.");
+        }
     };
 
     const fetchFees = async () => {
@@ -59,19 +67,23 @@ const MyFees = () => {
 
     const handleUploadClick = (fee) => {
         setSelectedFee(fee);
-        setUploadReceiptBase64('');
+        setUploadReceiptFile(null);
         setShowUploadModal(true);
     };
 
     const handleUploadSubmit = async (e) => {
         e.preventDefault();
+        if (!uploadReceiptFile) return;
+
         setUploadingReceipt(true);
         try {
-            await Axios.put(`http://localhost:8080/api/fees/${selectedFee._id}/upload-receipt`, {
-                parentReceiptBase64: uploadReceiptBase64
-            });
+            const data = new FormData();
+            data.append("parentReceipt", uploadReceiptFile);
+            
+            await Axios.put(`http://localhost:8080/api/fees/${selectedFee._id}/upload-receipt`, data);
+            
             setShowUploadModal(false);
-            setUploadReceiptBase64('');
+            setUploadReceiptFile(null);
             setSelectedFee(null);
             fetchFees();
         } catch (err) {
@@ -158,8 +170,8 @@ const MyFees = () => {
                                         </div>
 
                                         <div className="mt-auto pt-3 border-top d-flex flex-column gap-2">
-                                            {fee.adminVoucherBase64 && (
-                                                <Button variant="outline-secondary" className="w-100 rounded-pill fw-bold" onClick={() => downloadBase64File(fee.adminVoucherBase64, `Fee_Voucher_${fee.month}.png`)} title="Download / View Voucher">
+                                            {fee.adminVoucher && (
+                                                <Button variant="outline-secondary" className="w-100 rounded-pill fw-bold" onClick={() => downloadFile(fee.adminVoucher)} title="Download / View Voucher">
                                                     <i className="bi bi-download me-2"></i>Download Fee Voucher
                                                 </Button>
                                             )}
@@ -228,14 +240,12 @@ const MyFees = () => {
                                 onChange={(e) => {
                                     const file = e.target.files[0];
                                     if (file) {
-                                        const reader = new FileReader();
-                                        reader.onloadend = () => setUploadReceiptBase64(reader.result);
-                                        reader.readAsDataURL(file);
+                                        setUploadReceiptFile(file);
                                     }
                                 }}
                             />
                         </Form.Group>
-                        <Button type="submit" variant="primary" className="w-100 rounded-pill fw-bold py-2 mt-2" disabled={uploadingReceipt || !uploadReceiptBase64}>
+                        <Button type="submit" variant="primary" className="w-100 rounded-pill fw-bold py-2 mt-2" disabled={uploadingReceipt || !uploadReceiptFile}>
                             {uploadingReceipt ? <Spinner size="sm" className="me-2" /> : <i className="bi bi-check2-circle me-2"></i>}
                             {uploadingReceipt ? 'Uploading...' : 'Submit Receipt'}
                         </Button>

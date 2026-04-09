@@ -38,12 +38,16 @@ const handleSubmit = async (e) => {
             localStorage.setItem('userEmail', email);
             localStorage.setItem('userRole', role);
             localStorage.setItem('userName', data.uname || "User");
+            localStorage.setItem('userProfilePic', data.profilePic || "");
+            if (data.studentId) localStorage.setItem('studentId', data.studentId);
+            if (data.classNo) localStorage.setItem('classNo', data.classNo);
+            if (data.teacherClass) localStorage.setItem('teacherClass', data.teacherClass);
             
             setShowSuccessModal(true);
             
-            // Now redirect
+            // Now redirect with state
             setTimeout(() => {
-                navigate('/dashboard');
+                navigate('/dashboard', { state: { email, role, uname: data.uname, profilePic: data.profilePic } });
             }, 1000);
         } else {
             alert(data.message || "Invalid Login");

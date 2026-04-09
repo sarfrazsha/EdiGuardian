@@ -26,11 +26,11 @@ const Fee = new schema(
             type: String,
             required: true
         },
-        adminVoucherBase64: {
+        adminVoucher: {
             type: String,
             required: true
         },
-        parentReceiptBase64: {
+        parentReceipt: {
             type: String,
             required: false
         },

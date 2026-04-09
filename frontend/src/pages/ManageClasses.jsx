@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Container, Table, Button, Modal, Form, Card, Badge, Row, Col } from 'react-bootstrap';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
+import Axios from 'axios';
 
 const ManageClasses = () => {
     const navigate = useNavigate();
@@ -119,31 +120,24 @@ const ManageClasses = () => {
     // --- STATE MANAGEMENT ---
     const [classes, setClasses] = useState(initialClasses);
 
-    // Merge hardcoded students with any newly added ones from localStorage
-    const getSavedStudents = () => {
-        try {
-            return JSON.parse(localStorage.getItem('addedStudents') || '[]');
-        } catch { return []; }
-    };
-    const [allStudents, setAllStudents] = useState([...initialStudents, ...getSavedStudents()]);
+    // Merge hardcoded students with database students
+    const [allStudents, setAllStudents] = useState([...initialStudents]);
 
-    // Re-check localStorage when page gains focus (e.g. coming back from ManageStudents)
+    const fetchAllStudents = async () => {
+        try {
+            const response = await Axios.get('http://localhost:8080/api/students-detailed');
+            // Merge: mock data + database data
+            setAllStudents([...initialStudents, ...response.data]);
+        } catch (err) {
+            console.error("Fetch error in classes:", err);
+            setAllStudents(initialStudents);
+        }
+    };
+
     useEffect(() => {
-        const handleFocus = () => {
-            const saved = getSavedStudents();
-            // Merge: keep initialStudents + saved, deduplicate by id
-            const merged = [...initialStudents];
-            const existingIds = new Set(merged.map(s => s.id));
-            for (const s of saved) {
-                if (!existingIds.has(s.id)) {
-                    merged.push(s);
-                    existingIds.add(s.id);
-                }
-            }
-            setAllStudents(merged);
-        };
-        window.addEventListener('focus', handleFocus);
-        return () => window.removeEventListener('focus', handleFocus);
+        fetchAllStudents();
+        window.addEventListener('focus', fetchAllStudents);
+        return () => window.removeEventListener('focus', fetchAllStudents);
     }, []);
 
     // CRUD State

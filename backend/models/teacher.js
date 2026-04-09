@@ -3,7 +3,7 @@ const schema = mongoose.Schema;
 
 const Teacher = new schema(
     {
-        teacher_id: String,
+        
         teacherName:{
             type: String,
             required:true
@@ -30,11 +30,8 @@ const Teacher = new schema(
         teacherPassword:{
             type: String,
             required: true
-        },
-        role:{
-            type: String,
-            required: true
         }
+       
     
     }
 )

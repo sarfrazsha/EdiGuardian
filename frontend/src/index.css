@@ -145,12 +145,6 @@ body {
   box-shadow: 0 8px 15px rgba(67, 97, 238, 0.3) !important;
 }
 
-.btn {
-  border-radius: 50rem !important; 
-  font-weight: 700 !important;
-  letter-spacing: 0.5px;
-}
-
 #root {
   width: 100%;
   margin: 0;

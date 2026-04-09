@@ -35,6 +35,9 @@ const Parent = new schema(
             type: String,
             required: true
         },
+        parentImage:{
+            type:String
+        }
         
     }
 )

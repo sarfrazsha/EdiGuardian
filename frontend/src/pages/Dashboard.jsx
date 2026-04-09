@@ -1,15 +1,21 @@
 import React, { useEffect, useState } from 'react';
-import { Container, Row, Col, Card, Button, Spinner } from 'react-bootstrap';
+import { Container, Row, Col, Card, Button, Spinner, Modal, Table, Badge, Form, Dropdown } from 'react-bootstrap';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 
 const Dashboard = () => {
     const navigate = useNavigate();
     const [announcements, setAnnouncements] = useState([]);
-    const [adminStats, setAdminStats] = useState({ students: 0, teachers: 0, classes: 0 });
+    const [adminStats, setAdminStats] = useState({ 
+        students: 0, teachers: 0, classes: 0, 
+        monthlyFeeStats: [], // New structure for dynamic month tracking
+        pending: 0, review: 0, paid: 0, parents: 0 
+    });
+    const [selectedFeeMonth, setSelectedFeeMonth] = useState(new Date().toLocaleString('default', { month: 'long' }));
     const [isLoading, setIsLoading] = useState(true);
     const [userData, setUserData] = useState({ name: '', role: '', email: '', studentId: '' });
     const [todayAttendance, setTodayAttendance] = useState(null);
+    const [monthlyAttendance, setMonthlyAttendance] = useState('94%');
 
     useEffect(() => {
         // 1. Extract session data from localStorage
@@ -44,9 +50,12 @@ const Dashboard = () => {
             fetch(`http://localhost:8080/api/attendance/student/${sid}`)
                 .then(res => res.json())
                 .then(data => {
-                    // Find record for today
+                    const today = new Date().toISOString().split('T')[0];
                     const todayRec = data.find(r => new Date(r.date).toISOString().split('T')[0] === today);
                     setTodayAttendance(todayRec ? todayRec.status : 'Pending');
+
+                    // Hardcoded Monthly Percentage for demo
+                    setMonthlyAttendance('94%');
                 })
                 .catch(err => console.error("Fetch attendance error:", err));
         }
@@ -59,7 +68,12 @@ const Dashboard = () => {
                     setAdminStats({
                         students: data.totalStudents || 0,
                         teachers: data.totalTeachers || 0,
-                        classes: data.totalClasses || 0
+                        classes: data.totalClasses || 0,
+                        monthlyFeeStats: data.monthlyFeeStats || [],
+                        pending: data.feesPendingCount || 0,
+                        review: data.feesReviewCount || 0,
+                        paid: data.feesPaidCount || 0,
+                        parents: data.totalParents || 0
                     });
                     setIsLoading(false);
                 })
@@ -77,10 +91,21 @@ const Dashboard = () => {
         const userRole = userData.role?.toLowerCase();
         if (userRole === 'admin') {
             return [
-                { label: 'Active Students', value: adminStats.students, icon: 'bi-people', color: 'primary' },
-                { label: 'Active Teachers', value: adminStats.teachers, icon: 'bi-person-badge', color: 'success' },
-                { label: 'Active Classes', value: adminStats.classes, icon: 'bi-building', color: 'warning' },
-                { label: 'Monthly Revenue', value: 'Rs 12,400', icon: 'bi-cash-stack', color: 'info' }
+                { label: 'Active Students', value: adminStats.students, icon: 'bi-people', color: 'primary', link: '/manage-classes' },
+                { label: 'Active Teachers', value: adminStats.teachers, icon: 'bi-person-badge', color: 'success', link: '/manage-teachers' },
+                { label: 'Active Classes', value: adminStats.classes, icon: 'bi-building', color: 'warning', link: '/manage-classes' },
+                { label: 'Parent Hub', value: adminStats.parents, icon: 'bi-people-fill', color: 'dark', link: '/parent-hub' },
+                { label: 'Pending Fees', value: adminStats.pending, icon: 'bi-hourglass-split', color: 'warning', link: '/all-fees?status=Pending' },
+                { label: 'Under Review', value: adminStats.review, icon: 'bi-search', color: 'primary', link: '/all-fees?status=Review' },
+                { label: 'Paid Fees', value: adminStats.paid, icon: 'bi-check-circle-fill', color: 'success', link: '/all-fees?status=Paid' },
+                { 
+                    label: `Fees (Monthly Total)`, 
+                    value: `Rs ${(adminStats.monthlyFeeStats.find(s => s.month === selectedFeeMonth)?.total || 0).toLocaleString()}`, 
+                    icon: 'bi-cash-stack', 
+                    color: 'info', 
+                    link: '/all-fees',
+                    isDynamicMonth: true // Special flag for dropdown rendering
+                }
             ];
         } else if (userRole === 'teacher') {
             return [
@@ -89,13 +114,22 @@ const Dashboard = () => {
                 { label: 'Pending Gradings', value: '24', icon: 'bi-pencil-square', color: 'warning' },
                 { label: 'Attendance %', value: '92%', icon: 'bi-graph-up-arrow', color: 'info' }
             ];
-        } else {
+        } else if (userRole === 'student') {
             return [
-                { label: 'Attendance', value: todayAttendance || '95%', icon: 'bi-calendar-check', color: todayAttendance === 'Absent' ? 'danger' : 'success' },
-                { label: 'Current GPA', value: '3.8', icon: 'bi-star', color: 'warning' },
-                { label: 'Course Load', value: '06', icon: 'bi-journal-text', color: 'primary' },
-                { label: 'Library Books', value: '02', icon: 'bi-book-half', color: 'info' }
+                { label: 'Attendance (Month)', value: monthlyAttendance, icon: 'bi-graph-up-arrow', color: 'success', link: '/attendance-history' },
+                { label: 'Class Schedule', value: 'View Timetable', icon: 'bi-calendar3', color: 'secondary', link: '/schedule' },
+                { label: 'Pending Homework', value: '02', icon: 'bi-journal-text', color: 'warning', link: '/homework' },
+                { label: 'Upcoming Exam', value: 'To Be Announced', icon: 'bi-alarm', color: 'info', link: '/datesheet' }
             ];
+        } else if (userRole === 'parent') {
+            return [
+                { label: 'Child Attendance', value: monthlyAttendance, icon: 'bi-graph-up-arrow', color: 'success', link: '/attendance-history' },
+                { label: 'Child Results', value: 'View Grade', icon: 'bi-award-fill', color: 'primary', link: '/results' },
+                { label: 'School Fees', value: 'Check Status', icon: 'bi-cash-stack', color: 'info', link: '/my-fees' },
+                { label: 'Class Schedule', value: 'View Timetable', icon: 'bi-calendar3', color: 'warning', link: '/schedule' }
+            ];
+        } else {
+            return [];
         }
     };
 
@@ -125,15 +159,56 @@ const Dashboard = () => {
                 {/* Dynamic Stat Cards */}
                 <Row className="g-4 mb-4">
                     {stats.map((stat, i) => (
-                        <Col key={i} md={3}>
-                            <Card className="border-0 shadow-sm rounded-4 h-100">
-                                <Card.Body className="d-flex align-items-center p-4">
-                                    <div className={`bg-${stat.color} bg-opacity-10 p-3 rounded-3 text-${stat.color} me-3`}>
-                                        <i className={`bi ${stat.icon} fs-3`}></i>
+                        <Col key={i} md={3} sm={6}>
+                            <Card 
+                                className="border-0 shadow-sm rounded-4 h-100" 
+                                style={{ 
+                                    cursor: (stat.link || stat.isStatus) ? 'pointer' : 'default', 
+                                    transition: 'transform 0.2s' 
+                                }}
+                                onClick={() => {
+                                    if (stat.link) navigate(stat.link);
+                                }}
+                                onMouseOver={(e) => stat.link && (e.currentTarget.style.transform = 'translateY(-5px)')}
+                                onMouseOut={(e) => stat.link && (e.currentTarget.style.transform = 'translateY(0)')}
+                            >
+                                <Card.Body className="d-flex align-items-center p-3">
+                                    <div className={`bg-${stat.color} bg-opacity-10 p-2 rounded-3 text-${stat.color} me-3`}>
+                                        <i className={`bi ${stat.icon} fs-4`}></i>
                                     </div>
-                                    <div>
-                                        <div className="text-muted small fw-bold text-uppercase" style={{ fontSize: '10px' }}>{stat.label}</div>
-                                        <h4 className="fw-bold mb-0">{stat.value}</h4>
+                                    <div className="overflow-hidden flex-grow-1">
+                                        <div className="d-flex justify-content-between align-items-start mb-1">
+                                            <div className="text-muted small fw-bold text-uppercase" style={{ fontSize: '10px', letterSpacing: '0.5px' }}>{stat.label}</div>
+                                            {stat.isDynamicMonth && (
+                                                <div onClick={(e) => e.stopPropagation()}>
+                                                    <Dropdown align="end">
+                                                        <Dropdown.Toggle 
+                                                            variant="link" 
+                                                            className="p-0 border-0 text-primary fw-bold text-decoration-none d-flex align-items-center gap-1 shadow-none"
+                                                            style={{ fontSize: '10px' }}
+                                                        >
+                                                            <i className="bi bi-calendar3"></i>
+                                                            {selectedFeeMonth.slice(0, 3)}
+                                                            <i className="bi bi-chevron-down" style={{ fontSize: '8px' }}></i>
+                                                        </Dropdown.Toggle>
+
+                                                        <Dropdown.Menu className="border-0 shadow-lg p-2 rounded-3" style={{ minWidth: '120px', maxHeight: '200px', overflowY: 'auto' }}>
+                                                            {["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map(m => (
+                                                                <Dropdown.Item 
+                                                                    key={m} 
+                                                                    active={selectedFeeMonth === m}
+                                                                    onClick={() => setSelectedFeeMonth(m)}
+                                                                    className="rounded-2 py-2 small fw-medium"
+                                                                >
+                                                                    {m}
+                                                                </Dropdown.Item>
+                                                            ))}
+                                                        </Dropdown.Menu>
+                                                    </Dropdown>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <h5 className="fw-bold mb-0 text-truncate ls-1" title={stat.value} style={{ fontSize: '1.2rem', color: stat.isDynamicMonth ? '#0dcaf0' : 'inherit' }}>{stat.value}</h5>
                                     </div>
                                 </Card.Body>
                             </Card>

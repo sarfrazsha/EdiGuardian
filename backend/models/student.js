@@ -4,7 +4,7 @@ const schema = mongoose.Schema;
 const Student = new schema(
     {
 
-        studentId: String,
+       
         classNo: {
             type: String 
         },
@@ -34,7 +34,11 @@ const Student = new schema(
             type: String,
             required: true
         },
-        studentRole: String
+        studentImage:{
+            type:String,
+
+        }
+     
     }
 )
 
