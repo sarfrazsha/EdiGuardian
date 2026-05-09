@@ -76,7 +76,7 @@ const IssueFees = () => {
                 if (parentsInClass.length === 0) {
                     throw new Error("No parent records found for this class.");
                 }
-                // Append parents as a stringified JSON for the backend to parse
+                
                 data.append("parents", JSON.stringify(parentsInClass));
                 await Axios.post('http://localhost:8080/api/fees/bulk', data);
                 setSuccessMsg(`Fee alerts sent successfully to all ${parentsInClass.length} students!`);
@@ -188,7 +188,7 @@ const IssueFees = () => {
                                                 name="studentName"
                                                 value={formData.parentEmail === 'ALL' ? 'Bulk Class Members' : formData.studentName}
                                                 onChange={handleChange}
-                                                placeholder="e.g. John Doe"
+                                                placeholder="e.g. Ahmed"
                                             />
                                         </Form.Group>
 

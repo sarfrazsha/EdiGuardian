@@ -27,23 +27,21 @@ const Attendance = () => {
     const fetchStudentsAndAttendance = async () => {
         setIsLoading(true);
         try {
-            // 1. Fetch Students
+            
             const stdRes = await fetch(`http://localhost:8080/api/students/class/${teacherClass}`);
             const stdData = await stdRes.json();
             setStudents(stdData);
 
-            // 2. Fetch Existing Attendance for this date
+           
             const attRes = await fetch(`http://localhost:8080/api/attendance/class/${teacherClass}?date=${selectedDate}`);
             const attData = await attRes.json();
 
-            // 3. Map status to students
             const attMap = {};
             attData.forEach(rec => {
                 attMap[rec.studentId] = rec.status;
             });
             
-            // Set default 'Present' for those not marked if it's a new day, 
-            // but for safety let's just leave them unmarked or default all to 'Present'
+            
             const initialAtt = {};
             stdData.forEach(s => {
                 initialAtt[s.studentId] = attMap[s.studentId] || 'Present';

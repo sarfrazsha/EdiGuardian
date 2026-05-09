@@ -9,7 +9,7 @@ const ManageResults = () => {
     const role = localStorage.getItem('userRole');
     const email = localStorage.getItem('userEmail');
 
-    // Only allow teachers (and optionally admins)
+    
     if (!email || (role?.toLowerCase() !== 'teacher' && role?.toLowerCase() !== 'admin')) {
         return <Navigate to="/" replace />;
     }
@@ -22,15 +22,12 @@ const ManageResults = () => {
     const [selectedClass, setSelectedClass] = useState('');
     const [examType, setExamType] = useState('Mid-Term');
     
-    // Mock local state for grades since backend doesn't have a results table yet
     const [grades, setGrades] = useState({});
 
-    // Fetch students using the parents API which includes student names
     const fetchStudents = async () => {
         try {
             setLoading(true);
             const res = await Axios.get('http://localhost:8080/api/parents');
-            // Extract unique students from the parents list
             const uniqueStudents = res.data.map(p => ({
                 id: p.studentId,
                 name: p.studentName,
@@ -49,7 +46,6 @@ const ManageResults = () => {
         fetchStudents();
     }, []);
 
-    // Load grades from localStorage when class or exam type changes
     useEffect(() => {
         if (selectedClass && examType) {
             const allResults = JSON.parse(localStorage.getItem('school_academic_results') || '{}');
@@ -60,10 +56,12 @@ const ManageResults = () => {
         }
     }, [selectedClass, examType]);
 
-    // Unique classes from students
-    const classesList = [...new Set(students.map(s => s.classNo).filter(Boolean))].sort();
+    
+    const teacherClass = localStorage.getItem('teacherClass');
+    const classesList = role?.toLowerCase() === 'teacher' && teacherClass
+        ? [teacherClass]
+        : [...new Set(students.map(s => s.classNo).filter(Boolean))].sort();
 
-    // Filter students by selected class
     const filteredStudents = selectedClass 
         ? students.filter(s => s.classNo === selectedClass)
         : [];
@@ -82,7 +80,7 @@ const ManageResults = () => {
         if (!selectedClass || !examType) return;
         
         setSaving(true);
-        // Save to localStorage
+        
         const allResults = JSON.parse(localStorage.getItem('school_academic_results') || '{}');
         allResults[`${selectedClass}_${examType}`] = grades;
         localStorage.setItem('school_academic_results', JSON.stringify(allResults));
@@ -130,7 +128,7 @@ const ManageResults = () => {
                 {successMsg && <Alert variant="success" className="shadow-sm fw-bold border-0"><i className="bi bi-check-circle-fill me-2"></i>{successMsg}</Alert>}
 
                 <Row className="g-4">
-                    {/* Filter Card */}
+                
                     <Col lg={12}>
                         <Card className="border-0 shadow-sm rounded-4">
                             <Card.Body className="p-4 d-flex flex-column flex-md-row gap-4 align-items-end">
@@ -154,7 +152,7 @@ const ManageResults = () => {
                         </Card>
                     </Col>
 
-                    {/* Grading Table */}
+                   
                     {selectedClass && (
                     <Col lg={12}>
                         <Card className="border-0 shadow-sm rounded-4 overflow-hidden">

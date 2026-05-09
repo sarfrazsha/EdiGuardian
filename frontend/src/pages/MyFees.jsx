@@ -17,9 +17,9 @@ const MyFees = () => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
-    // Payment Modal State
+    
     const [showPayModal, setShowPayModal] = useState(false);
-    // Upload Receipt Modal State
+    
     const [showUploadModal, setShowUploadModal] = useState(false);
     const [selectedFee, setSelectedFee] = useState(null);
     const [uploadReceiptFile, setUploadReceiptFile] = useState(null);
@@ -220,7 +220,7 @@ const MyFees = () => {
                 )}
             </Container>
 
-            {/* Upload Receipt Modal */}
+           
             <Modal show={showUploadModal} onHide={() => !uploadingReceipt && setShowUploadModal(false)} centered backdrop="static">
                 <Modal.Header closeButton={!uploadingReceipt} className="border-0 pb-0">
                     <Modal.Title className="fw-bold">Upload Bank Receipt</Modal.Title>
@@ -253,7 +253,7 @@ const MyFees = () => {
                 </Modal.Body>
             </Modal>
 
-            {/* Payment Verification Modal */}
+           
             <Modal show={showPayModal} onHide={() => setShowPayModal(false)} centered backdrop="static">
                 <Modal.Header closeButton className="border-0 pb-0">
                     <Modal.Title className="fw-bold">Pay With Cashmaal</Modal.Title>

@@ -34,7 +34,7 @@ const Results = () => {
             const allResults = JSON.parse(localStorage.getItem('school_academic_results') || '{}');
             const classResults = allResults[`${classNo}_${activeTerm}`] || {};
             
-            // Find specific student marks
+            
             const marks = classResults[studentId];
             if (marks) {
                 const math = parseInt(marks.math || 0);
@@ -67,7 +67,7 @@ const Results = () => {
     return (
         <Layout>
             <Container fluid className="py-4">
-                {/* Header */}
+              
                 <div className="mb-4 d-flex justify-content-between align-items-center">
                     <div className="d-flex align-items-center gap-3">
                         <Button 
@@ -85,7 +85,6 @@ const Results = () => {
                     </div>
                 </div>
 
-                {/* Term Toggle */}
                 <Card className="border-0 shadow-sm rounded-4 mb-4 overflow-hidden">
                     <Card.Body className="p-0">
                         <Nav variant="pills" className="nav-fill bg-light p-2" activeKey={activeTerm} onSelect={(k) => setActiveTerm(k)}>
@@ -109,7 +108,6 @@ const Results = () => {
                     </div>
                 ) : result ? (
                     <Row className="g-4">
-                        {/* Summary Card */}
                         <Col lg={4}>
                             <Card className="border-0 shadow-sm rounded-4 h-100 bg-primary text-white text-center position-relative overflow-hidden">
                                 <div className="position-absolute top-0 end-0 p-3 opacity-25">
@@ -140,7 +138,6 @@ const Results = () => {
                             </Card>
                         </Col>
 
-                        {/* Subject Breakdown */}
                         <Col lg={8}>
                             <Row className="g-4">
                                 {[

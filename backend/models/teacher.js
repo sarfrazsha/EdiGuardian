@@ -13,10 +13,7 @@ const Teacher = new schema(
             required:true,
             match: [/^\d{11}$/, 'Phone number must be exactly 11 digits.']
         },
-        teacherClass:{
-            type: String,
-            required:true
-        },
+
         teacherAddress:{
             type:String,
             required:true
@@ -30,6 +27,9 @@ const Teacher = new schema(
         teacherPassword:{
             type: String,
             required: true
+        },
+        teacherProfile:{
+            type:String
         }
        
     

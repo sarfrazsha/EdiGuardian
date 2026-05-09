@@ -26,6 +26,7 @@ import AllFees from './pages/AllFees';
 import ParentHub from './pages/ParentHub';
 import ParentStudentDetails from './pages/ParentStudentDetails';
 import Results from './pages/Results';
+import TeacherReports from './pages/TeacherReports';
 
 function App() {
   return (
@@ -56,6 +57,7 @@ function App() {
         <Route path="/schedule" element={<Schedule />} />
         <Route path="/datesheet" element={<DateSheet />} />
         <Route path="/attendance-history" element={<AttendanceHistory />} />
+        <Route path="/teacher-reports" element={<TeacherReports />} />
       </Routes>
     </Router>
   );

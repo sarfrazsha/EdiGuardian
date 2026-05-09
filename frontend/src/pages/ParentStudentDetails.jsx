@@ -42,7 +42,7 @@ const ParentStudentDetails = () => {
                 </div>
 
                 <Row className="g-4">
-                    {/* Guardian Column */}
+                   
                     <Col lg={6}>
                         <Card className="border-0 shadow-sm rounded-4 h-100 overflow-hidden">
                             <div className="bg-primary bg-opacity-10 py-4 text-center border-bottom">
@@ -58,7 +58,7 @@ const ParentStudentDetails = () => {
                                     </Badge>
                                 </div>
                                 <h3 className="fw-bold mt-3 mb-1">{parentName}</h3>
-                                <p className="text-primary small fw-bold mb-0 text-uppercase tracking-wider">Household Representative</p>
+                                <p className="text-primary small fw-bold mb-0 text-uppercase tracking-wider">Guardian</p>
                             </div>
                             <Card.Body className="p-4">
                                 <h5 className="fw-bold mb-4 text-secondary text-uppercase" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>Contact Information</h5>
@@ -96,7 +96,7 @@ const ParentStudentDetails = () => {
                         </Card>
                     </Col>
 
-                    {/* Student Column */}
+                   
                     <Col lg={6}>
                         <Card className="border-0 shadow-sm rounded-4 h-100 overflow-hidden">
                             <div className="bg-info bg-opacity-10 py-4 text-center border-bottom">
@@ -112,7 +112,7 @@ const ParentStudentDetails = () => {
                                     </Badge>
                                 </div>
                                 <h3 className="fw-bold mt-3 mb-1">{studentName}</h3>
-                                <p className="text-info small fw-bold mb-0 text-uppercase tracking-wider">EduGuardian Scholar</p>
+                                <p className="text-info small fw-bold mb-0 text-uppercase tracking-wider">Student</p>
                             </div>
                             <Card.Body className="p-4">
                                 <h5 className="fw-bold mb-4 text-secondary text-uppercase" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>Academic & Personal Information</h5>

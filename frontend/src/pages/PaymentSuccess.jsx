@@ -22,7 +22,7 @@ const PaymentSuccess = () => {
             return;
         }
 
-        // When we land here from Cashmaal after successful payment
+        
         Axios.put(`http://localhost:8080/api/fees/${feeId}/pay`)
             .then(() => setStatus('success'))
             .catch((err) => {

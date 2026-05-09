@@ -38,7 +38,7 @@ const Homework = () => {
     };
 
     const handleEdit = (e, hw) => {
-        e.stopPropagation(); // Prevent row click
+        e.stopPropagation(); 
         setIsEditing(true);
         setCurrentHomeworkId(hw.id);
         setNewHomework({
@@ -46,13 +46,13 @@ const Homework = () => {
             subject: hw.subject,
             dueDate: hw.dueDate,
             description: hw.description,
-            file: null // Files aren't easily pre-filled in input[type=file]
+            file: null // 
         });
         setShowModal(true);
     };
 
     const handleDelete = (e, id) => {
-        e.stopPropagation(); // Prevent row click
+        e.stopPropagation(); 
         if (window.confirm('Are you sure you want to delete this assignment?')) {
             setHomeworks(homeworks.filter(hw => hw.id !== id));
         }
@@ -189,7 +189,7 @@ const Homework = () => {
                     </Card.Body>
                 </Card>
 
-                {/* View Homework Details Modal */}
+                
                 <Modal show={showViewModal} onHide={handleViewClose} centered size="lg">
                     <Modal.Header closeButton className="border-0 pb-0">
                         <Modal.Title className="fw-bold text-primary">Assignment Details</Modal.Title>
@@ -249,7 +249,7 @@ const Homework = () => {
                     </Modal.Footer>
                 </Modal>
 
-                {/* Create/Edit Homework Modal */}
+               
                 <Modal show={showModal} onHide={handleClose} centered backdrop="static">
                     <Modal.Header closeButton className="border-0 pb-0">
                         <Modal.Title className="fw-bold">{isEditing ? 'Edit Assignment' : 'Create New Assignment'}</Modal.Title>

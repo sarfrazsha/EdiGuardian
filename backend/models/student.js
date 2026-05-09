@@ -4,9 +4,9 @@ const schema = mongoose.Schema;
 const Student = new schema(
     {
 
-       
+
         classNo: {
-            type: String 
+            type: String
         },
         studentName: {
             type: String,
@@ -19,6 +19,7 @@ const Student = new schema(
         },
         studentRollNo: {
             type: String,
+            unique: true,
             required: true
         },
         studentGender: {
@@ -34,11 +35,11 @@ const Student = new schema(
             type: String,
             required: true
         },
-        studentImage:{
-            type:String,
+        studentImage: {
+            type: String,
 
         }
-     
+
     }
 )
 

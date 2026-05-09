@@ -1,19 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { Container, Table, Button, Modal, Form, Card, Badge, Row, Col } from 'react-bootstrap';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import Layout from '../components/Layout';
 import Axios from 'axios';
 
 const ManageClasses = () => {
     const navigate = useNavigate();
-    // --- MOCK DATA ---
-    const initialClasses = [
-        { id: 1, name: 'Class 1', section: 'A', teacher: 'Respected Naeem Akhter', teacherEmail: 'naeem@gmail.com' },
-        { id: 2, name: 'Class 2', section: 'A', teacher: 'Respected Saleem Akhter', teacherEmail: 'saleem@gmail.com' },
-        { id: 3, name: 'Class 3', section: 'A', teacher: 'Respected Qari Illyas Shb', teacherEmail: 'illyas@gmail.com' },
-        { id: 4, name: 'Class 4', section: 'A', teacher: 'Respected Naeem Akhter', teacherEmail: 'naeem@gmail.com' },
-        { id: 5, name: 'Class 5', section: 'A', teacher: 'Respected Saleem Akhter', teacherEmail: 'saleem@gmail.com' }
-    ];
+    const location = useLocation();
+    const classFilter = location.state?.classFilter;
+   
+    const [classes, setClasses] = useState([]);
+    const [unassignedTeachers, setUnassignedTeachers] = useState([]);
+
 
     const initialStudents = [
         {
@@ -117,16 +115,11 @@ const ManageClasses = () => {
         }
     ];
 
-    // --- STATE MANAGEMENT ---
-    const [classes, setClasses] = useState(initialClasses);
-
-    // Merge hardcoded students with database students
     const [allStudents, setAllStudents] = useState([...initialStudents]);
 
     const fetchAllStudents = async () => {
         try {
             const response = await Axios.get('http://localhost:8080/api/students-detailed');
-            // Merge: mock data + database data
             setAllStudents([...initialStudents, ...response.data]);
         } catch (err) {
             console.error("Fetch error in classes:", err);
@@ -134,21 +127,55 @@ const ManageClasses = () => {
         }
     };
 
+    const fetchClasses = async () => {
+        try {
+            const response = await Axios.get('http://localhost:8080/api/classes');
+            setClasses(response.data);
+        } catch (err) {
+            console.error("Error fetching classes:", err);
+        }
+    };
+
+    const fetchUnassignedTeachers = async () => {
+        try {
+            const response = await Axios.get('http://localhost:8080/api/teachers/unassigned');
+            setUnassignedTeachers(response.data);
+        } catch (err) {
+            console.error("Error fetching unassigned teachers:", err);
+        }
+    };
+
     useEffect(() => {
         fetchAllStudents();
-        window.addEventListener('focus', fetchAllStudents);
-        return () => window.removeEventListener('focus', fetchAllStudents);
+        fetchClasses();
+        window.addEventListener('focus', () => {
+            fetchAllStudents();
+            fetchClasses();
+        });
+        return () => window.removeEventListener('focus', () => {
+            fetchAllStudents();
+            fetchClasses();
+        });
     }, []);
 
-    // CRUD State
+
+    
+    useEffect(() => {
+        if (classFilter) {
+            const matched = classes.find(c => c.name === classFilter);
+            if (matched) setSelectedClass(matched);
+        }
+    }, [classFilter]);
+
+   
     const [show, setShow] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const [currentClass, setCurrentClass] = useState({ id: null, name: '', section: '', teacher: '', teacherEmail: '' });
 
-    // Drill-Down State
-    const [selectedClass, setSelectedClass] = useState(null); // null means show Overview, otherwise show Detail View
+  
+    const [selectedClass, setSelectedClass] = useState(null); 
 
-    // Student Modal State
+    
     const [showStudentModal, setShowStudentModal] = useState(false);
     const [selectedStudent, setSelectedStudent] = useState(null);
     const [isEditingStudent, setIsEditingStudent] = useState(false);
@@ -162,41 +189,56 @@ const ManageClasses = () => {
     };
 
 
-    // --- CRUD HANDLERS ---
     const handleShowAdd = () => {
         setIsEditing(false);
         setCurrentClass({ id: null, name: '', section: '', teacher: '', teacherEmail: '' });
+        fetchUnassignedTeachers();
         setShow(true);
     };
+
 
     const handleShowEdit = (cls) => {
         setIsEditing(true);
         setCurrentClass(cls);
+        fetchUnassignedTeachers();
         setShow(true);
     };
 
+
     const handleClose = () => setShow(false);
 
-    const handleSave = () => {
-        if (isEditing) {
-            setClasses(classes.map(c => c.id === currentClass.id ? currentClass : c));
-            if (selectedClass && selectedClass.id === currentClass.id) {
-                setSelectedClass(currentClass); // Update detail view if open
+    const handleSave = async () => {
+        try {
+            if (isEditing) {
+                await Axios.put(`http://localhost:8080/api/classes/${currentClass.id}`, currentClass);
+            } else {
+                await Axios.post('http://localhost:8080/api/classes', currentClass);
             }
-        } else {
-            const newEntry = { ...currentClass, id: Date.now() };
-            setClasses([...classes, newEntry]);
+            fetchClasses();
+            handleClose();
+        } catch (err) {
+            console.error("Error saving class:", err);
+            alert("Failed to save class. Please ensure all fields are filled.");
         }
-        handleClose();
     };
 
-    const handleDelete = (id) => {
+
+    const handleDelete = async (id) => {
         if (window.confirm("Are you sure you want to delete this class?")) {
-            setClasses(classes.filter(c => c.id !== id));
+            try {
+                await Axios.delete(`http://localhost:8080/api/classes/${id}`);
+                fetchClasses();
+                if (selectedClass && selectedClass.id === id) {
+                    setSelectedClass(null);
+                }
+            } catch (err) {
+                console.error("Error deleting class:", err);
+                alert("Failed to delete class.");
+            }
         }
     };
 
-    // --- VIEW RENDERERS ---
+
 
     const renderOverview = () => (
         <>
@@ -280,9 +322,9 @@ const ManageClasses = () => {
     );
 
     const renderClassDetail = () => {
-        // Filter students belonging to this class and apply search
+       
         const enrolledStudents = allStudents.filter(s => {
-            const matchesClass = s.studentClass === selectedClass.name;
+            const matchesClass = s.studentClass === `${selectedClass.name} - ${selectedClass.section}` || s.studentClass === selectedClass.name;
             const matchesSearch = !searchTerm || 
                 s.studentName.toLowerCase().includes(searchTerm.toLowerCase()) || 
                 (s.studentRollNo && s.studentRollNo.toString().toLowerCase().includes(searchTerm.toLowerCase()));
@@ -410,7 +452,7 @@ const ManageClasses = () => {
 
                 {selectedClass ? renderClassDetail() : renderOverview()}
 
-                {/* --- CRUD MODAL (For Add/Edit Class) --- */}
+                
                 <Modal show={show} onHide={handleClose} centered backdrop="static">
                     <Modal.Header closeButton className="border-0 pb-0">
                         <Modal.Title className="fw-bold text-dark h4">
@@ -421,13 +463,16 @@ const ManageClasses = () => {
                         <Form>
                             <Form.Group className="mb-4">
                                 <Form.Label className="small fw-bold text-secondary text-uppercase ls-1">Class Name</Form.Label>
-                                <Form.Control
-                                    type="text"
-                                    className="p-3 bg-light border-0 rounded-3"
+                                <Form.Select
+                                    className="p-3 bg-light border-0 rounded-3 shadow-none"
                                     value={currentClass.name}
-                                    placeholder="e.g. Grade 10"
                                     onChange={(e) => setCurrentClass({ ...currentClass, name: e.target.value })}
-                                />
+                                >
+                                    <option value="">Select Class...</option>
+                                    {[1, 2, 3, 4, 5].map(n => (
+                                        <option key={n} value={n}>{n}</option>
+                                    ))}
+                                </Form.Select>
                             </Form.Group>
                             <Form.Group className="mb-4">
                                 <Form.Label className="small fw-bold text-secondary text-uppercase ls-1">Section</Form.Label>
@@ -439,32 +484,42 @@ const ManageClasses = () => {
                                     onChange={(e) => setCurrentClass({ ...currentClass, section: e.target.value })}
                                 />
                             </Form.Group>
-                            <Row>
-                                <Col md={6}>
-                                    <Form.Group className="mb-4">
-                                        <Form.Label className="small fw-bold text-secondary text-uppercase ls-1">Primary Teacher</Form.Label>
-                                        <Form.Control
-                                            type="text"
-                                            className="p-3 bg-light border-0 rounded-3"
-                                            value={currentClass.teacher}
-                                            placeholder="e.g. Respected Naeem Akhter"
-                                            onChange={(e) => setCurrentClass({ ...currentClass, teacher: e.target.value })}
-                                        />
-                                    </Form.Group>
-                                </Col>
-                                <Col md={6}>
-                                    <Form.Group className="mb-4">
-                                        <Form.Label className="small fw-bold text-secondary text-uppercase ls-1">Teacher Email</Form.Label>
-                                        <Form.Control
-                                            type="email"
-                                            className="p-3 bg-light border-0 rounded-3"
-                                            value={currentClass.teacherEmail}
-                                            placeholder="teacher@gmail.com"
-                                            onChange={(e) => setCurrentClass({ ...currentClass, teacherEmail: e.target.value })}
-                                        />
-                                    </Form.Group>
-                                </Col>
-                            </Row>
+                            <Form.Group className="mb-4">
+                                <Form.Label className="small fw-bold text-secondary text-uppercase ls-1">Assign Teacher</Form.Label>
+                                <Form.Select
+                                    className="p-3 bg-light border-0 rounded-3 shadow-none"
+                                    value={currentClass.teacherEmail}
+                                    onChange={(e) => {
+                                        const email = e.target.value;
+                                        const teacher = [...unassignedTeachers, { teacherName: currentClass.teacher, teacherEmail: currentClass.teacherEmail }].find(t => t.teacherEmail === email);
+                                        if (teacher) {
+                                            setCurrentClass({ 
+                                                ...currentClass, 
+                                                teacher: teacher.teacherName, 
+                                                teacherEmail: teacher.teacherEmail 
+                                            });
+                                        } else {
+                                            setCurrentClass({ ...currentClass, teacher: '', teacherEmail: '' });
+                                        }
+                                    }}
+                                >
+                                    <option value="">Select Teacher...</option>
+                                    {isEditing && currentClass.teacher && (
+                                        <option value={currentClass.teacherEmail}>{currentClass.teacher} (Current)</option>
+                                    )}
+                                    {unassignedTeachers.map(t => (
+                                        <option key={t.teacherEmail} value={t.teacherEmail}>
+                                            {t.teacherName} ({t.teacherEmail})
+                                        </option>
+                                    ))}
+                                </Form.Select>
+                                {unassignedTeachers.length === 0 && !isEditing && (
+                                    <Form.Text className="text-danger mt-2 d-block">
+                                        No unassigned teachers available.
+                                    </Form.Text>
+                                )}
+                            </Form.Group>
+
                         </Form>
                     </Modal.Body>
                     <Modal.Footer className="border-0 pt-0">
@@ -475,14 +530,13 @@ const ManageClasses = () => {
                     </Modal.Footer>
                 </Modal>
 
-                {/* --- STUDENT PROFILE MODAL --- */}
+               
                 {selectedStudent && (
                     <Modal show={showStudentModal} onHide={() => setShowStudentModal(false)} size="lg" centered>
                         <Modal.Header closeButton className="border-0 pb-0 bg-light rounded-top-4">
                         </Modal.Header>
                         <Modal.Body className="p-0 bg-light rounded-bottom-4">
 
-                            {/* Header Banner */}
                             <div className="bg-primary bg-gradient p-5 position-relative text-center text-md-start d-flex flex-column flex-md-row align-items-center gap-4">
                                 {selectedStudent.studentProfilePicture ? (
                                     <img
@@ -512,7 +566,7 @@ const ManageClasses = () => {
                                 </div>
                             </div>
 
-                            {/* Details Container */}
+                          
                             <div className="p-4 p-md-5 bg-white rounded-top-4" style={{ marginTop: '-20px', position: 'relative', zIndex: 2 }}>
                                 {isEditingStudent ? (
                                     <Form>
@@ -575,7 +629,7 @@ const ManageClasses = () => {
                                     </Form>
                                 ) : (
                                     <Row className="g-5">
-                                        {/* Personal Info */}
+                                     {/* Personal Info */}
                                         <Col md={6}>
                                             <h6 className="text-primary fw-bold text-uppercase ls-1 mb-4 d-flex align-items-center">
                                                 <i className="bi bi-person-badge-fill me-2 fs-5"></i>
@@ -604,7 +658,7 @@ const ManageClasses = () => {
                                             </div>
                                         </Col>
 
-                                        {/* Parent Info */}
+                                        
                                         <Col md={6}>
                                             <h6 className="text-success fw-bold text-uppercase ls-1 mb-4 d-flex align-items-center">
                                                 <i className="bi bi-house-heart-fill me-2 fs-5"></i>
@@ -635,7 +689,7 @@ const ManageClasses = () => {
                                     </Row>
                                 )}
 
-                                {/* Action Buttons */}
+                               
                                 <div className="mt-5 d-flex justify-content-end gap-3 pt-3 border-top">
                                     {!isEditingStudent ? (
                                         <>

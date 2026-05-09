@@ -80,7 +80,6 @@ const ParentHub = () => {
                     </Card.Body>
                 </Card>
 
-                {/* Main Table */}
                 <Card className="border-0 shadow-sm rounded-4 overflow-hidden">
                     <Card.Body className="p-0">
                         <div className="table-responsive">
@@ -119,8 +118,9 @@ const ParentHub = () => {
                                             </td>
                                             <td className="text-center">
                                                 <Badge bg="info" className="bg-opacity-10 text-info px-3 py-2 rounded-pill fw-bold">
-                                                    Class {p.classNo}
+                                                    {p.classNo}
                                                 </Badge>
+
                                             </td>
                                             <td className="text-center">
                                                 <Button size="sm" variant="outline-primary" className="rounded-pill px-3" onClick={() => navigate('/parent-student-details', { state: { household: p } })}>

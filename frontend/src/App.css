@@ -2,9 +2,9 @@
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  /* 1. Change this to allow light mode by default */
+  
   color-scheme: light; 
-  /* 2. Remove the hardcoded dark background/text colors from :root */
+  
 }
 
 body {
@@ -12,17 +12,17 @@ body {
   padding: 0;
   width: 100vw;
   min-height: 100vh;
-  /* 3. Set a neutral background or let components handle it */
+  
   background-color: #ffffff; 
   color: #213547;
   overflow-x: hidden;
 }
 
-/* 4. Ensure #root (the React container) doesn't restrict width */
+
 #root {
   width: 100%;
   margin: 0;
   padding: 0;
 }
 
-/* ... Keep your .hero-section and .hero-overlay classes exactly as they are ... */
+ 

@@ -7,12 +7,13 @@ const app = express();
 const mongoose = require("mongoose");
 const port = 8080;
 const path = require("path");
-const upload = require('./middleware/upload');     
+const upload = require('./middleware/upload'); 
+const getRelativePath=require('./helper/helper')    
 app.use(cors());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.json({ limit: '50mb' }));
-let adminAlertQueue = []; // In-memory queue for transient admin alerts
+let adminAlertQueue = []; 
 const link = 'mongodb://127.0.0.1:27017/FYP';
 const Admin = require("./models/admin")
 const Parent = require('./models/parent');
@@ -21,9 +22,10 @@ const Student = require("./models/student");
 const Announcement = require("./models/announcement");
 const Fee = require("./models/fee");
 const Attendance = require("./models/attendance");
+const Class = require("./models/classes");
 
-// app.set("view engine", "ejs");
-// app.set("views", path.join(__dirname, "views"));
+
+
 main()
     .then(() => {
         console.log("connected to DB")
@@ -69,13 +71,10 @@ app.get("/users", async (req, res) => {
     countTeachers = await Teacher.countDocuments({});
     countAdmins = await Admin.countDocuments({});
 
-    const teacherClasses = await Teacher.distinct('teacherClass');
-    const studentClasses = await Student.distinct('classNo');
-    const parentClasses = await Parent.distinct('classNo');
-    const activeClasses = new Set([...teacherClasses, ...studentClasses, ...parentClasses].filter(Boolean));
-    const countClasses = activeClasses.size;
+    const countClasses = await Class.countDocuments({});
 
-    // Calculate fee totals grouped by month
+
+    
     const monthlyFeeData = await Fee.aggregate([
         { $group: { _id: '$month', total: { $sum: '$amount' } } }
     ]);
@@ -84,7 +83,7 @@ app.get("/users", async (req, res) => {
         total: item.total
     }));
 
-    // Counts for fee statuses (Pending, Review, Paid)
+    
     const feesPendingCount = await Fee.countDocuments({ status: 'Pending' });
     const feesReviewCount = await Fee.countDocuments({ status: 'Review' });
     const feesPaidCount = await Fee.countDocuments({ status: 'Paid' });
@@ -100,21 +99,153 @@ app.get("/users", async (req, res) => {
         feesReviewCount: feesReviewCount,
         feesPaidCount: feesPaidCount
     })
-
-
 })
+
+app.get("/api/teacher/stats/:email", async (req, res) => {
+    try {
+        const { email } = req.params;
+        const teacherClass = await Class.findOne({ teacherEmail: email });
+        if (!teacherClass) {
+            return res.json({ students: 0, attendanceToday: 0, className: 'Not Assigned' });
+        }
+        
+        const className = `${teacherClass.className} - ${teacherClass.section}`;
+        const studentsCount = await Student.countDocuments({ classNo: className });
+        
+        const today = new Date().toISOString().split('T')[0];
+        const attendance = await Attendance.findOne({ classNo: className, date: today });
+        
+        let attendancePercentage = 0;
+        if (attendance && studentsCount > 0) {
+            const presentCount = attendance.attendanceRecords.filter(r => r.status === 'Present').length;
+            attendancePercentage = Math.round((presentCount / studentsCount) * 100);
+        }
+        
+        res.json({
+            students: studentsCount,
+            attendanceToday: attendancePercentage,
+            className: className
+        });
+    } catch (err) {
+        res.status(500).json({ message: "Error fetching teacher stats" });
+    }
+});
+
+app.get("/api/reports/teacher/:email", async (req, res) => {
+    try {
+        const { email } = req.params;
+        const teacherClass = await Class.findOne({ teacherEmail: email });
+        if (!teacherClass) return res.status(404).json({ message: "No class assigned" });
+
+        const className = `${teacherClass.className} - ${teacherClass.section}`;
+        const students = await Student.find({ classNo: className });
+        
+        const now = new Date();
+        const firstDayLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const lastDayLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+        
+        const attendanceRecords = await Attendance.find({
+            classNo: className,
+            date: { $gte: firstDayLastMonth.toISOString().split('T')[0], $lte: lastDayLastMonth.toISOString().split('T')[0] }
+        });
+
+        let totalDays = attendanceRecords.length;
+        let attendanceStats = students.map(s => {
+            let presentCount = 0;
+            attendanceRecords.forEach(att => {
+                const rec = att.attendanceRecords.find(r => r.studentId === s.studentId);
+                if (rec && rec.status === 'Present') presentCount++;
+            });
+            return {
+                name: s.studentName,
+                rollNo: s.studentRollNo,
+                percentage: totalDays > 0 ? Math.round((presentCount / totalDays) * 100) : 0
+            };
+        });
+
+        res.json({
+            className,
+            month: firstDayLastMonth.toLocaleString('default', { month: 'long' }),
+            stats: attendanceStats
+        });
+    } catch (err) {
+        res.status(500).json({ message: "Error generating report" });
+    }
+});
 
 
 app.get("/api/classes", async (req, res) => {
     try {
-        const studentClasses = await Student.distinct('classNo');
-        const parentClasses = await Parent.distinct('classNo');
-        const classes = [...new Set([...studentClasses, ...parentClasses].filter(Boolean))].sort();
-        res.status(200).json(classes);
+        const classes = await Class.find({}).lean();
+        res.status(200).json(classes.map(c => ({
+            id: c._id,
+            _id: c._id,
+            name: c.className,
+            section: c.section,
+            teacher: c.teacherId, // Using teacherId field to store/return name for now as per current frontend usage
+            teacherEmail: c.teacherEmail
+        })));
     } catch (err) {
         res.status(500).json({ message: "Error fetching classes" });
     }
 });
+
+app.post("/api/classes", async (req, res) => {
+    try {
+        const { name, section, teacher, teacherEmail } = req.body;
+        const newClass = new Class({ 
+            className: name, 
+            section, 
+            teacherId: teacher, 
+            teacherEmail 
+        });
+        await newClass.save();
+        res.status(201).json(newClass);
+    } catch (err) {
+        console.error("Class Save Error:", err);
+        res.status(500).json({ message: "Error creating class" });
+    }
+});
+
+app.put("/api/classes/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, section, teacher, teacherEmail } = req.body;
+        const updatedClass = await Class.findByIdAndUpdate(id, {
+            className: name,
+            section,
+            teacherId: teacher,
+            teacherEmail
+        }, { new: true });
+        res.json(updatedClass);
+    } catch (err) {
+        res.status(500).json({ message: "Error updating class" });
+    }
+});
+
+app.delete("/api/classes/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+        await Class.findByIdAndDelete(id);
+        res.json({ message: "Class deleted successfully" });
+    } catch (err) {
+        res.status(500).json({ message: "Error deleting class" });
+    }
+});
+
+app.get("/api/teachers/unassigned", async (req, res) => {
+    try {
+        const teachers = await Teacher.find({}).lean();
+        const classes = await Class.find({}).lean();
+        const assignedEmails = classes.map(c => c.teacherEmail);
+        const unassigned = teachers.filter(t => !assignedEmails.includes(t.teacherEmail));
+        res.json(unassigned);
+    } catch (err) {
+        res.status(500).json({ message: "Error fetching unassigned teachers" });
+    }
+});
+
+
 app.post("/students", (req, res, next) => {
     upload.fields([
         { name: 'studentProfilePicture', maxCount: 1 },
@@ -132,14 +263,7 @@ app.post("/students", (req, res, next) => {
 
         let { studentName, studentAge, studentRollNo, studentGender, studentEmail, studentPassword, studentClass, parentName, parentPhone, parentAddress, parentEmail, parentPassword } = req.body;
         
-        // Helper to get normalized relative path (e.g., 'images/file.jpg')
-        const getRelativePath = (files, fieldName) => {
-            if (files && files[fieldName] && files[fieldName][0]) {
-                const fullPath = files[fieldName][0].path; // e.g. 'uploads/images/abc.jpg'
-                return fullPath.replace(/\\/g, '/').replace(/^uploads\//, '');
-            }
-            return '';
-        };
+      
 
         const studentProfilePicture = getRelativePath(req.files, 'studentProfilePicture');
         const parentProfilePicture = getRelativePath(req.files, 'parentProfilePicture');
@@ -158,7 +282,7 @@ app.post("/students", (req, res, next) => {
             studentImage: studentProfilePicture
         });
         let savedStudent = await student.save();
-        console.log("Student Record Saved:", savedStudent._id);
+       
 
         const parent = new Parent({
             studentId: savedStudent._id,
@@ -171,7 +295,7 @@ app.post("/students", (req, res, next) => {
             parentImage: parentProfilePicture
         });
         let savedParent = await parent.save();
-        console.log("Parent Record Saved:", savedParent._id);
+   
 
         res.status(201).json({
             message: "Student and Parent data saved successfully!",
@@ -196,7 +320,7 @@ app.get("/api/students-detailed", async (req, res) => {
                 studentAge: s.studentAge,
                 studentRollNo: s.studentRollNo,
                 studentGender: s.studentGender,
-                studentClass: s.classNo, // Map classNo to studentClass for frontend compatibility
+                studentClass: s.classNo, 
                 studentEmail: s.studentEmail,
                 studentPassword: s.studentPassword,
                 studentProfilePicture: s.studentImage ? `http://localhost:8080/uploads/${s.studentImage}` : '',
@@ -274,9 +398,10 @@ app.post("/student/login", async (req, res) => {
                 profilePic: profilePic
             };
 
-            // Add role-specific data to login response
+          
             if (role === "teacher") {
-                responseData.teacherClass = user.teacherClass;
+                const tClass = await Class.findOne({ teacherEmail: email });
+                responseData.teacherClass = tClass ? `${tClass.className} - ${tClass.section}` : 'Not Assigned';
             } else if (role === "parent") {
                 responseData.studentId = user.studentId;
                 responseData.classNo = user.classNo;
@@ -296,46 +421,116 @@ app.post("/student/login", async (req, res) => {
     }
 });
 
-app.post("/users", async (req, res) => {
 
-    let { teacherName, phoneNumber, className, email, password, address } = req.body;
-
-    const teacher = new Teacher({
-        teacher_id: uuidv4(),
-        teacherName: teacherName,
-        teacherContact: phoneNumber,
-        teacherClass: className,
-        teacherEmail: email,
-        teacherAddress: address,
-        teacherPassword: password,
+app.post("/users", upload.fields([{ name: 'profilePicture', maxCount: 1 }]), async (req, res) => {
+    try {
+        let { teacherName, phoneNumber, email, password, address } = req.body;
         
+        
+        const profilePicture = getRelativePath(req.files, 'profilePicture');
+
+        const teacher = new Teacher({
+            teacherName: teacherName,
+            teacherContact: phoneNumber,
+            teacherEmail: email,
+            teacherAddress: address,
+            teacherPassword: password,
+            teacherProfile: profilePicture
+        });
+
+
+        await teacher.save();
+        res.status(201).json({
+            message: "Teacher data saved successfully!"
+        });
+    } catch (err) {
+        console.error("Teacher Save Error:", err);
+        res.status(500).json({ message: err.message || "Error saving teacher record" });
+    }
+});
+
+
+app.get("/api/teachers", async (req, res) => {
+    try {
+        const teachers = await Teacher.find({}).lean();
+        const classes = await Class.find({}).lean();
+
+        const teachersWithPics = teachers.map(t => {
+            const assignedClass = classes.find(c => c.teacherEmail === t.teacherEmail);
+            return {
+                ...t,
+                id: t._id,
+                class: assignedClass ? `${assignedClass.className} - ${assignedClass.section}` : 'Not Assigned',
+                phoneNumber: t.teacherContact,
+                email: t.teacherEmail,
+                profilePicture: t.teacherProfile ? `http://localhost:8080/uploads/${t.teacherProfile}` : ''
+            };
+        });
+        res.json(teachersWithPics);
+    } catch (err) {
+        res.status(500).json({ message: "Error fetching teachers" });
+    }
+});
 
 
 
-    })
-    await teacher.save()
-        .then(() => {
-            res.status(201).json({
-                message: "Teacher data is save Successfully!"
-            })
-        })
+app.put("/teacher/update/:id", upload.fields([{ name: 'profilePicture', maxCount: 1 }]), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const updatedData = {
+            teacherName,
+            teacherContact: phoneNumber,
+            teacherEmail: email,
+            teacherAddress: address,
+        };
 
-})
+        if (password) {
+            updatedData.teacherPassword = password;
+        }
+
+        const profilePicture = getRelativePath(req.files, 'profilePicture');
+        if (profilePicture) {
+            updatedData.teacherProfile = profilePicture;
+        }
+
+        const teacher = await Teacher.findByIdAndUpdate(id, updatedData, { new: true });
+        if (!teacher) {
+            return res.status(404).json({ message: "Teacher not found" });
+        }
+
+        res.json({ message: "Teacher updated successfully", teacher });
+    } catch (err) {
+        console.error("Teacher Update Error:", err);
+        res.status(500).json({ message: "Error updating teacher record" });
+    }
+});
 
 
-// Announcement Routes
+app.delete("/teacher/delete/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await Teacher.findByIdAndDelete(id);
+        if (!result) {
+            return res.status(404).json({ message: "Teacher not found" });
+        }
+        res.json({ message: "Teacher deleted successfully" });
+    } catch (err) {
+        res.status(500).json({ message: "Error deleting teacher" });
+    }
+});
 
-// GET announcements (optionally filtered by role for marquee)
+
+
 app.get("/api/announcements", async (req, res) => {
     try {
         const { role } = req.query;
         const now = new Date();
         let filter = {
-            // Exclude announcements that have expired
+      
             $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }]
         };
         if (role && role.toLowerCase() !== 'admin') {
-            // Return announcements targeted at 'all' or specifically this role
+           
             filter.targetAudience = { $in: ['all', role.toLowerCase()] };
         }
         const announcements = await Announcement.find(filter).sort({ createdAt: -1 });
@@ -345,11 +540,10 @@ app.get("/api/announcements", async (req, res) => {
     }
 });
 
-// POST create announcement
+
 app.post("/api/announcements", async (req, res) => {
     try {
         const { title, content, role, targetAudience, durationDays } = req.body;
-        // Simple role check
         if (role !== "admin" && role !== "Admin") {
             return res.status(403).json({ message: "Unauthorized: Admins only" });
         }
@@ -373,7 +567,6 @@ app.post("/api/announcements", async (req, res) => {
     }
 });
 
-// PUT update announcement
 app.put("/api/announcements/:id", async (req, res) => {
     try {
         const { id } = req.params;
@@ -400,7 +593,6 @@ app.put("/api/announcements/:id", async (req, res) => {
     }
 });
 
-// PUT mark all as read for a user
 app.put("/api/announcements/mark-all-read", async (req, res) => {
     try {
         const { email } = req.body;
@@ -416,19 +608,11 @@ app.put("/api/announcements/mark-all-read", async (req, res) => {
     }
 });
 
-// DELETE announcement
 app.delete("/api/announcements/:id", async (req, res) => {
     try {
         const { id } = req.params;
-        // Note: In a real app, you'd check auth/role from headers/session here too.
-        // For this FYP structure, we might need to pass role in body or query if not using tokens.
-        // Assuming the frontend will prevent the call, but let's check body if possible.
-        // DELETE requests often don't have a body in some conventions, but Express supports it.
-        // Alternatively, we can pass it as a query param or just trust the frontend for this simple demo?
-        // Let's rely on a header or query param for delete to be safe-ish?
-        // Let's assume the body hack works or use query.
+   
         const { role } = req.body;
-        // If body is empty, check query
         const userRole = role || req.query.role;
 
         if (userRole !== "admin" && userRole !== "Admin") {
@@ -442,7 +626,6 @@ app.delete("/api/announcements/:id", async (req, res) => {
     }
 });
 
-// --- Fee & Parent Routes ---
 
 app.get("/api/parents", async (req, res) => {
     try {
@@ -497,7 +680,6 @@ app.post("/api/fees", upload.single('adminVoucher'), async (req, res) => {
     }
 });
 
-// Bulk process fees
 app.post("/api/fees/bulk", upload.single('adminVoucher'), async (req, res) => {
     try {
         let { parents, amount, dueDate, month, classNo, role } = req.body;
@@ -505,7 +687,6 @@ app.post("/api/fees/bulk", upload.single('adminVoucher'), async (req, res) => {
             return res.status(403).json({ message: "Unauthorized" });
         }
 
-        // If parents is sent as a string (happens with FormData), parse it
         if (typeof parents === 'string') {
             try {
                 parents = JSON.parse(parents);
@@ -522,6 +703,7 @@ app.post("/api/fees/bulk", upload.single('adminVoucher'), async (req, res) => {
         if (!adminVoucher) {
             return res.status(400).json({ message: "Fee voucher file is required." });
         }
+
 
         const feesToInsert = parents.map(p => ({
             studentName: p.studentName || "Student",
@@ -587,10 +769,9 @@ app.put("/api/fees/:id/upload-receipt", upload.single('parentReceipt'), async (r
             { new: true }
         );
 
-        // Add a transient alert to the in-memory queue for the Admin
         if (updatedFee) {
             adminAlertQueue.push({
-                _id: Date.now().toString(), // Generate a temporary ID
+                _id: Date.now().toString(), 
                 title: "Action Required: Fee Receipt Uploaded",
                 content: `${updatedFee.studentName} has uploaded a receipt for ${updatedFee.month}. Please review in the Fee Records Hub.`,
                 isAlert: true,
@@ -619,20 +800,27 @@ app.put("/api/fees/:id/approve", async (req, res) => {
     }
 });
 
-// --- Attendance Routes ---
 
-// GET students by class
+
+
+
 app.get("/api/students/class/:classNo", async (req, res) => {
     try {
         const { classNo } = req.params;
-        const students = await Student.find({ classNo: classNo }).sort({ studentName: 1 });
-        res.json(students);
+        const students = await Student.find({ classNo: classNo.trim() }).sort({ studentName: 1 }).lean();
+        
+    
+        const mappedStudents = students.map(s => ({
+            ...s,
+            studentId: s._id
+        }));
+        
+        res.json(mappedStudents);
     } catch (err) {
         res.status(500).json({ message: "Error fetching students for class" });
     }
 });
 
-// POST mark/update attendance (bulk)
 app.post("/api/attendance", async (req, res) => {
     try {
         const { attendanceRecords, date, classNo, markedBy } = req.body;
@@ -668,7 +856,7 @@ app.post("/api/attendance", async (req, res) => {
     }
 });
 
-// GET attendance for a class on a specific date
+
 app.get("/api/attendance/class/:classNo", async (req, res) => {
     try {
         const { classNo } = req.params;
@@ -685,7 +873,6 @@ app.get("/api/attendance/class/:classNo", async (req, res) => {
     }
 });
 
-// GET attendance history for a student
 app.get("/api/attendance/student/:studentId", async (req, res) => {
     try {
         const { studentId } = req.params;
@@ -699,10 +886,10 @@ app.get("/api/attendance/student/:studentId", async (req, res) => {
 app.use(express.static(path.join(__dirname, "../frontend/dist")));
 
 
-// Endpoint for Admin to poll transient alerts (clears queue after reading)
+
 app.get("/api/notifications/admin", (req, res) => {
     const alerts = [...adminAlertQueue];
-    adminAlertQueue = []; // Clear the queue immediately
+    adminAlertQueue = []; 
     res.json(alerts);
 });
 

@@ -99,7 +99,7 @@ const AllFees = () => {
 
                 {error && <Alert variant="danger" dismissible onClose={() => setError(null)}>{error}</Alert>}
 
-                {/* Filters Section */}
+               
                 <Card className="border-0 shadow-sm rounded-4 mb-4">
                     <Card.Body className="p-3 p-md-4">
                         <Row className="g-3 align-items-end">
@@ -140,7 +140,7 @@ const AllFees = () => {
                     </Card.Body>
                 </Card>
 
-                {/* Table Section */}
+              
                 <Card className="border-0 shadow-sm rounded-4 overflow-hidden">
                     <Card.Body className="p-0">
                         <div className="table-responsive">
@@ -152,7 +152,7 @@ const AllFees = () => {
                                         <th>Amount</th>
                                         <th>Due Date</th>
                                         <th className="text-center">Status</th>
-                                        <th className="text-center">Actions</th>
+                                     
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -190,9 +190,7 @@ const AllFees = () => {
                                                             </Button>
                                                         </>
                                                     )}
-                                                    <Button size="sm" variant="outline-info" className="rounded-pill p-1 px-2 text-decoration-none" onClick={() => navigate('/manage-students')} title="View Student">
-                                                        <i className="bi bi-person"></i>
-                                                    </Button>
+                                               
                                                 </div>
                                             </td>
                                         </tr>

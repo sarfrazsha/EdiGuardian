@@ -5,7 +5,7 @@ import RoleButton from '../components/RoleButton';
 import AppNavbar from '../components/Navbar';
 import Footer from '../components/Footer';
 
-// Assets
+
 import background from '../assets/pakistani_hero.png';
 import kid1 from '../assets/pakistani_kid1.png';
 import kid2 from '../assets/pakistani_kid2.png';
@@ -31,7 +31,7 @@ const Home = () => {
         <div className="public-page-wrapper" style={{ overflowX: 'hidden' }}>
             <AppNavbar />
 
-            {/* Scrolling Gallery Strip */}
+            
             <div className="gallery-strip-container" style={{
                 backgroundColor: '#ffffff',
                 padding: '1.5rem 0',
@@ -77,7 +77,6 @@ const Home = () => {
                 </div>
             </div>
 
-            {/* Redesigned Hero Section */}
             <div
                 className="hero-section"
                 style={{
@@ -91,7 +90,7 @@ const Home = () => {
                     overflow: 'hidden'
                 }}
             >
-                {/* Animated Gradient Overlay */}
+               
                 <div className="hero-gradient-overlay" style={{
                     position: 'absolute',
                     top: 0,
@@ -102,7 +101,7 @@ const Home = () => {
                     zIndex: 1
                 }}></div>
 
-                {/* Floating Shapes Animation */}
+              
                 <div className="floating-shape shape-1"></div>
                 <div className="floating-shape shape-2"></div>
 
@@ -202,4 +201,4 @@ const Home = () => {
     );
 };
 
-export default Home;
+export default Home;

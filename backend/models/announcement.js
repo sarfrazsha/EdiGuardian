@@ -22,10 +22,7 @@ const announcementSchema = new mongoose.Schema({
         type: Date,
         default: null, 
     },
-    readBy: {
-        type: [String],
-        default: [],
-    },
+    
     createdAt: {
         type: Date,
         default: Date.now,

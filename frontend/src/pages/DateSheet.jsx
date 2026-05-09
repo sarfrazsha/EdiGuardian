@@ -31,7 +31,7 @@ const DateSheet = () => {
                         </div>
                         <h3 className="fw-bold text-dark mb-3">Not Yet Announced</h3>
                         <p className="text-muted mx-auto mb-4" style={{ maxWidth: '400px' }}>
-                            The examination schedule for the upcoming term has not been published by the administration yet. Please check back later or wait for an official announcement.
+                            The examination schedule for the upcoming term has not been published yet. Please check back later or wait for an official announcement.
                         </p>
                         <Button variant="primary" className="rounded-pill px-5 py-2 shadow-sm" onClick={() => navigate('/dashboard')}>
                             Return to Dashboard

@@ -8,32 +8,34 @@ const Dashboard = () => {
     const [announcements, setAnnouncements] = useState([]);
     const [adminStats, setAdminStats] = useState({ 
         students: 0, teachers: 0, classes: 0, 
-        monthlyFeeStats: [], // New structure for dynamic month tracking
+        monthlyFeeStats: [], 
         pending: 0, review: 0, paid: 0, parents: 0 
     });
     const [selectedFeeMonth, setSelectedFeeMonth] = useState(new Date().toLocaleString('default', { month: 'long' }));
     const [isLoading, setIsLoading] = useState(true);
     const [userData, setUserData] = useState({ name: '', role: '', email: '', studentId: '' });
     const [todayAttendance, setTodayAttendance] = useState(null);
-    const [monthlyAttendance, setMonthlyAttendance] = useState('94%');
+    const [monthlyAttendance, setMonthlyAttendance] = useState('Checking...');
+
+    const [teacherStats, setTeacherStats] = useState({ students: 0, attendanceToday: 0, className: '' });
 
     useEffect(() => {
-        // 1. Extract session data from localStorage
+        
         const email = localStorage.getItem('userEmail');
         const role = localStorage.getItem('userRole');
         const name = localStorage.getItem('userName');
 
-        // 2. If no email, the user isn't logged in - boot them to login
+        
         if (!email) {
             console.log("No session found, redirecting...");
             navigate('/');
             return;
         }
 
-        // 3. Set user data to state
+      
         setUserData({ name, role, email, studentId: localStorage.getItem('studentId') || '' });
 
-        // 4. Fetch Announcements from backend (filtered by role)
+       
         fetch(`http://localhost:8080/api/announcements?role=${(role || '').toLowerCase()}`)
             .then(res => res.json())
             .then(data => {
@@ -43,7 +45,7 @@ const Dashboard = () => {
                 console.error("Fetch announcements error:", err);
             });
 
-        // 5. Fetch attendance if parent or student
+      
         const sid = localStorage.getItem('studentId');
         if (sid && (role?.toLowerCase() === 'parent' || role?.toLowerCase() === 'student')) {
             const today = new Date().toISOString().split('T')[0];
@@ -54,13 +56,17 @@ const Dashboard = () => {
                     const todayRec = data.find(r => new Date(r.date).toISOString().split('T')[0] === today);
                     setTodayAttendance(todayRec ? todayRec.status : 'Pending');
 
-                    // Hardcoded Monthly Percentage for demo
-                    setMonthlyAttendance('94%');
+                    if (data.length > 0) {
+                        const presentCount = data.filter(r => r.status === 'Present').length;
+                        const percentage = Math.round((presentCount / data.length) * 100);
+                        setMonthlyAttendance(`${percentage}%`);
+                    } else {
+                        setMonthlyAttendance('Not Marked Yet');
+                    }
                 })
                 .catch(err => console.error("Fetch attendance error:", err));
         }
 
-        // 6. Fetch dashboard stats if admin
         if (role?.toLowerCase() === 'admin') {
             fetch('http://localhost:8080/users')
                 .then(res => res.json())
@@ -81,12 +87,23 @@ const Dashboard = () => {
                     console.error("Fetch stats error:", err);
                     setIsLoading(false);
                 });
+        } else if (role?.toLowerCase() === 'teacher') {
+            fetch(`http://localhost:8080/api/teacher/stats/${email}`)
+                .then(res => res.json())
+                .then(data => {
+                    setTeacherStats(data);
+                    setIsLoading(false);
+                })
+                .catch(err => {
+                    console.error("Fetch teacher stats error:", err);
+                    setIsLoading(false);
+                });
         } else {
             setIsLoading(false);
         }
+
     }, [navigate]);
 
-    // ROLE-BASED STATS CONFIGURATION
     const getStats = () => {
         const userRole = userData.role?.toLowerCase();
         if (userRole === 'admin') {
@@ -104,16 +121,18 @@ const Dashboard = () => {
                     icon: 'bi-cash-stack', 
                     color: 'info', 
                     link: '/all-fees',
-                    isDynamicMonth: true // Special flag for dropdown rendering
+                    isDynamicMonth: true 
                 }
             ];
         } else if (userRole === 'teacher') {
             return [
-                { label: 'My Classes', value: '05', icon: 'bi-book', color: 'primary' },
-                { label: 'Total Students', value: '180', icon: 'bi-people', color: 'success' },
-                { label: 'Pending Gradings', value: '24', icon: 'bi-pencil-square', color: 'warning' },
-                { label: 'Attendance %', value: '92%', icon: 'bi-graph-up-arrow', color: 'info' }
+                { label: 'My Class', value: teacherStats.className || 'Not Assigned', icon: 'bi-book', color: 'primary', link: '/attendance' },
+                { label: 'Total Students', value: teacherStats.students, icon: 'bi-people', color: 'success', link: '/manage-classes' },
+                { label: 'Today\'s Attendance', value: `${teacherStats.attendanceToday}%`, icon: 'bi-graph-up-arrow', color: 'info', link: '/attendance' },
+                { label: 'Grade Results', value: 'Manage', icon: 'bi-pencil-square', color: 'warning', link: '/manage-results' },
+                { label: 'Monthly Report', value: 'Generate', icon: 'bi-file-earmark-pdf', color: 'dark', link: '/teacher-reports' }
             ];
+
         } else if (userRole === 'student') {
             return [
                 { label: 'Attendance (Month)', value: monthlyAttendance, icon: 'bi-graph-up-arrow', color: 'success', link: '/attendance-history' },
@@ -133,7 +152,7 @@ const Dashboard = () => {
         }
     };
 
-    // Show a loading spinner while checking session
+    
     if (isLoading) {
         return (
             <div className="d-flex justify-content-center align-items-center vh-100 bg-light">
@@ -150,13 +169,12 @@ const Dashboard = () => {
     return (
         <Layout>
             <Container fluid className="py-2">
-                {/* Header Section */}
+              
                 <div className="mb-4">
                     <h2 className="fw-bold text-dark">Welcome back, {userData.name}! 👋</h2>
                     <p className="text-muted">You are logged in as <span className="badge bg-primary bg-opacity-10 text-primary text-uppercase">{userData.role}</span></p>
                 </div>
 
-                {/* Dynamic Stat Cards */}
                 <Row className="g-4 mb-4">
                     {stats.map((stat, i) => (
                         <Col key={i} md={3} sm={6}>
@@ -208,7 +226,22 @@ const Dashboard = () => {
                                                 </div>
                                             )}
                                         </div>
-                                        <h5 className="fw-bold mb-0 text-truncate ls-1" title={stat.value} style={{ fontSize: '1.2rem', color: stat.isDynamicMonth ? '#0dcaf0' : 'inherit' }}>{stat.value}</h5>
+                                        <h5 
+                                            className="fw-bold mb-0 ls-1 pt-1" 
+                                            title={stat.value} 
+                                            style={{ 
+                                                fontSize: '1.1rem', 
+                                                lineHeight: '1.2',
+                                                color: stat.isDynamicMonth ? '#6d6763' : 'inherit',
+                                                wordBreak: 'break-word',
+                                                display: '-webkit-box',
+                                                WebkitLineClamp: '2',
+                                                WebkitBoxOrient: 'vertical',
+                                                overflow: 'hidden'
+                                            }}
+                                        >
+                                            {stat.value}
+                                        </h5>
                                     </div>
                                 </Card.Body>
                             </Card>
@@ -217,7 +250,7 @@ const Dashboard = () => {
                 </Row>
 
                 <Row className="g-4">
-                    {/* Recent Announcements */}
+                  
                     <Col lg={12}>
                         <Card className="border-0 shadow-sm rounded-4 h-100">
                             <Card.Header className="bg-white py-3 border-0 d-flex justify-content-between align-items-center">

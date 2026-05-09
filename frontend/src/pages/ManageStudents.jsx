@@ -26,7 +26,7 @@ const ManageStudents = () => {
         }
     }, [openAdd, classFilter]);
 
-    // SDS Requirement: Role-Based Access Control
+    
     if (!email || (role !== 'Admin' && role !== 'admin')) {
         return <Navigate to="/" replace />;
     }
@@ -36,7 +36,7 @@ const ManageStudents = () => {
     const [error, setError] = useState(null);
     const [showSuccessModal, setShowSuccessModal] = useState(false);
 
-    // Hardcoded mock data
+    
     const initialStudents = [
         {
             id: '1',
@@ -109,6 +109,8 @@ const ManageStudents = () => {
     ];
 
     const [students, setStudents] = useState(initialStudents);
+    const [classes, setClasses] = useState([]);
+
 
     const [formData, setFormData] = useState({
         studentName: '',
@@ -127,19 +129,19 @@ const ManageStudents = () => {
         parentProfilePicture: ''
     });
 
-    // Image previews for diagnostic purposes
+    
     const [previews, setPreviews] = useState({
         student: null,
         parent: null
     });
 
 
-    // 1. Fetch Students from Node/Express Middleware
+    
     const fetchStudents = async () => {
         setLoading(true);
         try {
             const response = await Axios.get('http://localhost:8080/api/students-detailed');
-            // Merge: hardcoded mock data + database data
+           
             setStudents([...initialStudents, ...response.data]);
         } catch (err) {
             console.error("Fetch error:", err);
@@ -148,7 +150,20 @@ const ManageStudents = () => {
         setLoading(false);
     };
 
-    useEffect(() => { fetchStudents(); }, []);
+    const fetchClasses = async () => {
+        try {
+            const response = await Axios.get('http://localhost:8080/api/classes');
+            setClasses(response.data);
+        } catch (err) {
+            console.error("Error fetching classes:", err);
+        }
+    };
+
+    useEffect(() => { 
+        fetchStudents();
+        fetchClasses();
+    }, []);
+
 
     const handleChange = (e) => {
         const { name, value } = e.target;
@@ -173,7 +188,7 @@ const ManageStudents = () => {
     console.log("Form State:", formData);
 
     try {
-        // Create FormData to send files
+       
         const data = new FormData();
         data.append("studentName", formData.studentName);
         data.append("studentAge", formData.studentAge);
@@ -183,7 +198,7 @@ const ManageStudents = () => {
         data.append("studentEmail", formData.studentEmail);
         data.append("studentPassword", formData.studentPassword);
         
-        // Append File objects directly
+        
         if (formData.studentProfilePicture) {
             console.log("Attaching Student Picture:", formData.studentProfilePicture.name);
             data.append("studentProfilePicture", formData.studentProfilePicture);
@@ -204,11 +219,11 @@ const ManageStudents = () => {
             console.warn("No Parent Picture selected.");
         }
 
-        // Send to backend - let Axios handle Content-Type and boundaries
+        
         const response = await Axios.post('http://localhost:8080/students', data);
         console.log("Upload Success:", response.data);
 
-        // Update local state by re-fetching
+        
         await fetchStudents();
 
         setShowSuccessModal(true);
@@ -279,7 +294,10 @@ const ManageStudents = () => {
                                                 <Col md={6}>
                                                     <Form.Group className="mb-3">
                                                         <Form.Label className="small fw-bold">Roll Number (Unique ID)</Form.Label>
-                                                        <Form.Control required name="studentRollNo" value={formData.studentRollNo} onChange={handleChange} placeholder="e.g. 2024-001" />
+                                                        <Form.Control required name="studentRollNo" value={formData.studentRollNo} onChange={handleChange} placeholder="e.g. 01-5A" />
+                                                        <Form.Text className="text-muted" style={{ fontSize: '10px' }}>
+                                                            Format: [RollNo]-[Class][Section] (e.g. 01-5A)
+                                                        </Form.Text>
                                                     </Form.Group>
                                                 </Col>
                                                 <Col md={6}>
@@ -305,12 +323,13 @@ const ManageStudents = () => {
                                                         <Form.Label className="small fw-bold">Class</Form.Label>
                                                         <Form.Select required name="studentClass" value={formData.studentClass} onChange={handleChange}>
                                                             <option value="">Select Class...</option>
-                                                            <option>Class 1</option>
-                                                            <option>Class 2</option>
-                                                            <option>Class 3</option>
-                                                            <option>Class 4</option>
-                                                            <option>Class 5</option>
+                                                            {classes.map(c => (
+                                                                <option key={c.id} value={`${c.name} - ${c.section}`}>
+                                                                    {c.name} - {c.section}
+                                                                </option>
+                                                            ))}
                                                         </Form.Select>
+
                                                     </Form.Group>
                                                 </Col>
                                             </Row>
@@ -345,7 +364,7 @@ const ManageStudents = () => {
                                             </Form.Group>
                                         </Col>
 
-                                        {/* Tier 2: Linked Parent Information */}
+                                        
                                         <Col md={6} className="ps-md-4">
                                             <h6 className="text-success fw-bold mb-3 text-uppercase small">Linked Parent/Guardian Account</h6>
                                             <Form.Group className="mb-3">

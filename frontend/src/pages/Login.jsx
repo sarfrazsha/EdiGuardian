@@ -1,6 +1,5 @@
 
 import React, { useState } from 'react';
-// import { Container, Form, Button, Card, InputGroup } from 'react-bootstrap';
 import { Container, Form, Button, Row, Col, Card, Alert, Modal, InputGroup, ListGroup } from 'react-bootstrap';
 
 import { useParams, useNavigate } from 'react-router-dom';
@@ -24,7 +23,7 @@ const Login = () => {
 const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-        // FIXED: Added http://localhost:8080
+        
         const response = await fetch('http://localhost:8080/student/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -34,7 +33,7 @@ const handleSubmit = async (e) => {
         const data = await response.json();
 
         if (response.ok) {
-            // Save data first
+           
             localStorage.setItem('userEmail', email);
             localStorage.setItem('userRole', role);
             localStorage.setItem('userName', data.uname || "User");
@@ -45,7 +44,7 @@ const handleSubmit = async (e) => {
             
             setShowSuccessModal(true);
             
-            // Now redirect with state
+            
             setTimeout(() => {
                 navigate('/dashboard', { state: { email, role, uname: data.uname, profilePic: data.profilePic } });
             }, 1000);
@@ -123,7 +122,7 @@ const handleSubmit = async (e) => {
                 </Container>
             </div>
             <div>
-                    {/* Success Modal */}
+                    
                                 <Modal show={showSuccessModal} onHide={() => setShowSuccessModal(false)} centered>
                                     <Modal.Header closeButton>
                                         <Modal.Title className="text-success">Success!</Modal.Title>

@@ -20,12 +20,12 @@ const Announcements = () => {
     };
 
     const [announcements, setAnnouncements] = useState([]);
-    // Admin create/edit modal
+   
     const [showFormModal, setShowFormModal] = useState(false);
     const [editingAnnouncement, setEditingAnnouncement] = useState(null);
     const [formData, setFormData] = useState({ title: '', content: '', targetAudience: 'all', durationDays: '7' });
     const [loading, setLoading] = useState(false);
-    // Detail view modal (all users)
+    
     const [selectedAnn, setSelectedAnn] = useState(null);
 
     if (!email) return <Navigate to="/" replace />;
@@ -48,7 +48,7 @@ const Announcements = () => {
 
     const fetchAnnouncements = async () => {
         try {
-            // Admin sees all; others see only their targeted announcements
+            
             const roleParam = isAdmin ? '' : `?role=${(role || '').toLowerCase()}`;
             const res = await axios.get(`http://localhost:8080/api/announcements${roleParam}`);
             setAnnouncements(res.data);
@@ -104,7 +104,7 @@ const Announcements = () => {
             setEditingAnnouncement(null);
             setFormData({ title: '', content: '', targetAudience: 'all', durationDays: '7' });
         }
-        setSelectedAnn(null); // close detail modal if open
+        setSelectedAnn(null); 
         setShowFormModal(true);
     };
 
@@ -121,7 +121,7 @@ const Announcements = () => {
     return (
         <Layout>
             <Container fluid className="py-4" style={{ maxWidth: '860px' }}>
-                {/* Header */}
+               
                 <div className="d-flex justify-content-between align-items-center mb-4">
                     <div>
                         <h2 className="fw-bold text-primary mb-0">
@@ -136,7 +136,7 @@ const Announcements = () => {
                     )}
                 </div>
 
-                {/* Announcement List */}
+                
                 {announcements.length === 0 ? (
                     <div className="text-center py-5">
                         <i className="bi bi-megaphone fs-1 text-muted"></i>
@@ -159,16 +159,16 @@ const Announcements = () => {
                                     <Card.Body className="px-4 py-3">
                                         <div className="d-flex align-items-center justify-content-between">
                                             <div className="d-flex align-items-center gap-3 flex-grow-1 overflow-hidden">
-                                                {/* Unread dot */}
+                                            
                                                 <div style={{
                                                     width: '10px', height: '10px', borderRadius: '50%', flexShrink: 0,
                                                     background: isUnread ? '#0d6efd' : '#dee2e6'
                                                 }} title={isUnread ? 'Unread' : 'Read'} />
-                                                {/* Number */}
+                                        
                                                 <span className="text-muted fw-bold" style={{ fontSize: '0.8rem', minWidth: '24px' }}>
                                                     {String(idx + 1).padStart(2, '0')}
                                                 </span>
-                                                {/* Title */}
+                                              
                                                 <span className={`fw-semibold text-truncate ${isUnread ? 'text-dark' : 'text-secondary'}`} style={{ fontSize: '0.97rem' }}>
                                                     {item.title}
                                                 </span>
@@ -203,7 +203,7 @@ const Announcements = () => {
                 )}
             </Container>
 
-            {/* ── Detail View Modal (click to read) ── */}
+         
             <Modal show={!!selectedAnn} onHide={() => setSelectedAnn(null)} centered size="lg">
                 {selectedAnn && (
                     <>
@@ -256,7 +256,7 @@ const Announcements = () => {
                 )}
             </Modal>
 
-            {/* ── Admin Create / Edit Modal ── */}
+            
             <Modal show={showFormModal} onHide={() => setShowFormModal(false)} centered backdrop="static">
                 <Modal.Header closeButton className="border-0 pb-0">
                     <Modal.Title className="fw-bold">

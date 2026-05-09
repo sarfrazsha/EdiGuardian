@@ -15,8 +15,7 @@ const Sidebar = ({ showMobileSidebar, onHideMobileSidebar }) => {
     const role = location.state?.role || localStorage.getItem('userRole');
     const email = location.state?.email || localStorage.getItem('userEmail');
     const uname = location.state?.uname || localStorage.getItem('userName');
-    // const image= location.state?.proflie;
-    // Profile picture: stored in localStorage or passed via state
+    
     const [profilePic, setProfilePic] = useState(
         () => location.state?.profilePic || localStorage.getItem('userProfilePic') || DEFAULT_AVATAR
     );
@@ -237,7 +236,7 @@ const Sidebar = ({ showMobileSidebar, onHideMobileSidebar }) => {
 
                         {/* Teachers — opens action dialog */}
                         <Nav.Link
-                            onClick={() => openEntityDialog('Teachers', '/manage-users', '/manage-teachers')}
+                            onClick={() => openEntityDialog('Teachers', '/manage-teachers', '/manage-teachers')}
                             className={`d-flex align-items-center px-4 py-3 mb-2 rounded-3 text-white transition-all ${
                                 location.pathname === '/manage-teachers' ? 'bg-primary shadow-lg active' : 'opacity-75 hover-bg-dark'
                             }`}
@@ -406,13 +405,12 @@ const Sidebar = ({ showMobileSidebar, onHideMobileSidebar }) => {
                                                     variant="light"
                                                     className="text-start border-0 py-2 px-3 rounded-3 hover-bg-primary-subtle"
                                                     onClick={() => {
-                                                        const path = entityDialog.managePath;
                                                         setEntityDialog(null);
-                                                        navigate(path, { state: { email, role, uname, classFilter: cls } });
+                                                        navigate('/manage-classes', { state: { email, role, uname, classFilter: cls } });
                                                     }}
                                                 >
                                                     <i className="bi bi-arrow-right-short me-2 text-primary"></i>
-                                                    Class {cls}
+                                                    {cls}
                                                 </Button>
                                             ))}
                                             <hr className="my-2 opacity-10" />
