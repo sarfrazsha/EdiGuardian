@@ -1,8 +1,103 @@
-import React, { useEffect, useState } from 'react';
-import { Container, Row, Col, Card, Button, Spinner, Modal, Table, Badge, Form, Dropdown, ProgressBar } from 'react-bootstrap';
+import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Container, Row, Col, Card, Button, Spinner, Modal, Table, Badge, ProgressBar } from 'react-bootstrap';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import ChildSelector from '../components/ChildSelector';
+
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+// A month picker that visually drops down from its own toggle button, staying
+// anchored to the card it lives in - but the menu itself is portaled to
+// document.body. This card sits inside a hover-transformed ancestor (for the
+// lift-on-hover effect), which makes any menu positioned as a normal DOM
+// descendant liable to be clipped or mis-stacked by that transform's new
+// containing block. Portaling escapes that entirely while getBoundingClientRect
+// keeps the menu visually right under the toggle, so it still reads as part
+// of the card.
+const MonthPicker = ({ value, onChange }) => {
+    const [open, setOpen] = useState(false);
+    const [coords, setCoords] = useState(null);
+    const toggleRef = useRef(null);
+    const menuRef = useRef(null);
+
+    const openMenu = () => {
+        const rect = toggleRef.current.getBoundingClientRect();
+        setCoords({ top: rect.bottom + 6, right: window.innerWidth - rect.right });
+        setOpen(true);
+    };
+
+    useEffect(() => {
+        if (!open) return;
+        const handleClickOutside = (e) => {
+            if (toggleRef.current?.contains(e.target) || menuRef.current?.contains(e.target)) return;
+            setOpen(false);
+        };
+        const handleKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+        const handleReposition = () => setOpen(false); // scroll/resize: just close rather than chase a stale position
+        document.addEventListener('mousedown', handleClickOutside);
+        document.addEventListener('keydown', handleKey);
+        window.addEventListener('scroll', handleReposition, true);
+        window.addEventListener('resize', handleReposition);
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+            document.removeEventListener('keydown', handleKey);
+            window.removeEventListener('scroll', handleReposition, true);
+            window.removeEventListener('resize', handleReposition);
+        };
+    }, [open]);
+
+    return (
+        <>
+            <Button
+                ref={toggleRef}
+                variant="outline-primary"
+                size="sm"
+                onClick={(e) => { e.stopPropagation(); open ? setOpen(false) : openMenu(); }}
+                className="rounded-pill px-2 py-1 fw-bold d-flex align-items-center gap-1 shadow-sm bg-white flex-shrink-0"
+                style={{ fontSize: '11px', lineHeight: 1.4 }}
+                title={`Showing: ${value}`}
+            >
+                <i className="bi bi-calendar3"></i>
+                {value.slice(0, 3)}
+                <i className={`bi bi-chevron-${open ? 'up' : 'down'}`} style={{ fontSize: '9px' }}></i>
+            </Button>
+            {open && coords && createPortal(
+                <div
+                    ref={menuRef}
+                    className="border-0 shadow-lg p-2 rounded-3 bg-white"
+                    style={{
+                        position: 'fixed', top: coords.top, right: coords.right,
+                        minWidth: '160px', maxHeight: '260px', overflowY: 'auto', zIndex: 2000
+                    }}
+                    // A portal escapes the DOM tree (so it isn't clipped by the
+                    // card), but React's synthetic events still bubble through
+                    // the *component* tree - so without this, a click in here
+                    // would still reach the card's own onClick and navigate
+                    // away instead of just picking a month.
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <div className="text-uppercase small fw-bold text-muted px-2 pb-1" style={{ fontSize: '10px', letterSpacing: '0.5px' }}>
+                        Select Month
+                    </div>
+                    {MONTH_NAMES.map(m => (
+                        <button
+                            key={m}
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); onChange(m); setOpen(false); }}
+                            className={`btn w-100 text-start rounded-2 py-2 px-2 fw-medium d-flex align-items-center gap-2 border-0 ${m === value ? 'bg-primary bg-opacity-10 text-primary' : ''}`}
+                            style={{ fontSize: '13px' }}
+                        >
+                            {m === value && <i className="bi bi-check-lg"></i>}
+                            {m}
+                        </button>
+                    ))}
+                </div>,
+                document.body
+            )}
+        </>
+    );
+};
 
 const Dashboard = () => {
     const navigate = useNavigate();
@@ -164,12 +259,12 @@ const Dashboard = () => {
 
     // Fetch students for teacher's class (modal)
     const handleOpenStudentList = async () => {
-        const teacherClass = localStorage.getItem('teacherClass');
-        if (!teacherClass) return;
+        const teacherEmail = localStorage.getItem('userEmail');
+        if (!teacherEmail) return;
         setLoadingStudents(true);
         setShowStudentListModal(true);
         try {
-            const res = await fetch(`/api/students/class/${teacherClass}`);
+            const res = await fetch(`/api/students/teacher/${encodeURIComponent(teacherEmail)}`);
             const data = await res.json();
             setClassStudents(data);
         } catch (err) {
@@ -190,9 +285,9 @@ const Dashboard = () => {
                 { label: 'Under Review', value: adminStats.review, icon: 'bi-hourglass-split', color: 'warning', link: '/all-fees?status=Review' },
                 { label: 'Pending Fees', value: adminStats.pending, icon: 'bi-exclamation-circle', color: 'danger', link: '/all-fees?status=Pending' },
                 { label: 'Paid Fees', value: adminStats.paid, icon: 'bi-check-circle-fill', color: 'success', link: '/all-fees?status=Paid' },
-                { 
-                    label: `Fees (Monthly Total)`, 
-                    value: `Rs ${(adminStats.monthlyFeeStats.find(s => s.month === selectedFeeMonth)?.total || 0).toLocaleString()}`, 
+                {
+                    label: `Fees (Monthly Total, ${new Date().getFullYear()})`,
+                    value: `Rs ${(adminStats.monthlyFeeStats.find(s => s.month === selectedFeeMonth)?.total || 0).toLocaleString()}`,
                     icon: 'bi-cash-stack', 
                     color: 'info', 
                     link: '/all-fees',
@@ -200,8 +295,12 @@ const Dashboard = () => {
                 }
             ];
         } else if (userRole === 'teacher') {
+            const hasMultipleClasses = teacherStats.classes && teacherStats.classes.length > 1;
+            const classDisplay = hasMultipleClasses
+                ? teacherStats.classes.join(', ')
+                : (teacherStats.className || 'Not Assigned');
             return [
-                { label: 'My Class', value: teacherStats.className || 'Not Assigned', icon: 'bi-book', color: 'primary', action: 'openStudentList' },
+                { label: hasMultipleClasses ? 'My Classes' : 'My Class', value: classDisplay, icon: 'bi-book', color: 'primary', action: 'openStudentList' },
                 { label: 'Total Students', value: teacherStats.students, icon: 'bi-people', color: 'success', action: 'openStudentList' },
                 { label: 'Today\'s Attendance', value: `${teacherStats.attendanceToday}%`, icon: 'bi-graph-up-arrow', color: 'info', action: 'openAttendance' },
                 { label: 'Grade Results', value: 'Manage', icon: 'bi-pencil-square', color: 'warning', link: '/manage-results' },
@@ -251,11 +350,11 @@ const Dashboard = () => {
                     {/* <p className="text-muted">You are logged in as <span className="badge bg-primary bg-opacity-10 text-primary text-uppercase">{userData.role}</span></p> */}
                 </div>
 
-                <Row className="g-4 mb-4">
+                <div className="dashboard-stat-grid mb-4">
                     {stats.map((stat, i) => (
-                        <Col key={i} md={3} sm={6}>
+                        <div key={i} className="dashboard-stat-col">
                             <Card 
-                                className={`border-0 shadow-sm rounded-4 h-100 ${stat.animate ? 'pulse-warning' : ''}`} 
+                                className={`dashboard-stat-card h-100 ${stat.animate ? 'pulse-warning' : ''}`} 
                                 style={{ 
                                     cursor: (stat.link || stat.action || stat.isStatus) ? 'pointer' : 'default', 
                                     transition: 'transform 0.2s',
@@ -269,45 +368,25 @@ const Dashboard = () => {
                                 onMouseOver={(e) => (stat.link || stat.action) && (e.currentTarget.style.transform = 'translateY(-5px)')}
                                 onMouseOut={(e) => (stat.link || stat.action) && (e.currentTarget.style.transform = 'translateY(0)')}
                             >
-                                <Card.Body className="d-flex align-items-center p-3">
-                                    <div className={`bg-${stat.color} bg-opacity-10 p-2 rounded-3 text-${stat.color} me-3`}>
+                                <Card.Body className="dashboard-stat-body d-flex align-items-center">
+                                    <div className={`dashboard-stat-icon stat-icon-${i % 4}`}>
                                         <i className={`bi ${stat.icon} fs-4`}></i>
                                     </div>
+                                    {/* overflow-hidden keeps the row (label + month toggle) inside the
+                                        card's bounds instead of spilling past its edge. Safe now that
+                                        MonthPicker's open menu is portaled to document.body - it's no
+                                        longer a descendant of this wrapper, so clipping here doesn't
+                                        touch it. */}
                                     <div className="overflow-hidden flex-grow-1">
                                         <div className="d-flex justify-content-between align-items-start mb-1">
-                                            <div className="text-muted small fw-bold text-uppercase" style={{ fontSize: '10px', letterSpacing: '0.5px' }}>{stat.label}</div>
+                                            <div className="dashboard-stat-label">{stat.label}</div>
                                             {stat.subValue && (
                                                 <div className={`fw-bold ${stat.animate ? 'text-danger' : 'text-muted'}`} style={{ fontSize: '9px' }}>
                                                     {stat.subValue}
                                                 </div>
                                             )}
                                             {stat.isDynamicMonth && (
-                                                <div onClick={(e) => e.stopPropagation()}>
-                                                    <Dropdown align="end">
-                                                        <Dropdown.Toggle 
-                                                            variant="link" 
-                                                            className="p-0 border-0 text-primary fw-bold text-decoration-none d-flex align-items-center gap-1 shadow-none"
-                                                            style={{ fontSize: '10px' }}
-                                                        >
-                                                            <i className="bi bi-calendar3"></i>
-                                                            {selectedFeeMonth.slice(0, 3)}
-                                                            <i className="bi bi-chevron-down" style={{ fontSize: '8px' }}></i>
-                                                        </Dropdown.Toggle>
-
-                                                        <Dropdown.Menu className="border-0 shadow-lg p-2 rounded-3" style={{ minWidth: '120px', maxHeight: '200px', overflowY: 'auto' }}>
-                                                            {["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map(m => (
-                                                                <Dropdown.Item 
-                                                                    key={m} 
-                                                                    active={selectedFeeMonth === m}
-                                                                    onClick={() => setSelectedFeeMonth(m)}
-                                                                    className="rounded-2 py-2 small fw-medium"
-                                                                >
-                                                                    {m}
-                                                                </Dropdown.Item>
-                                                            ))}
-                                                        </Dropdown.Menu>
-                                                    </Dropdown>
-                                                </div>
+                                                <MonthPicker value={selectedFeeMonth} onChange={setSelectedFeeMonth} />
                                             )}
                                         </div>
                                         <h5 
@@ -329,14 +408,14 @@ const Dashboard = () => {
                                     </div>
                                 </Card.Body>
                             </Card>
-                        </Col>
+                        </div>
                     ))}
-                </Row>
+                </div>
 
-                <Row className="g-4">
+                <Row className="g-4 dashboard-content-row">
                   
                     <Col lg={12}>
-                        <Card className="border-0 shadow-sm rounded-4 h-100">
+                        <Card className="dashboard-main-panel h-100">
                             <Card.Header className="bg-white py-3 border-0 d-flex justify-content-between align-items-center">
                                 <h5 className="fw-bold mb-0">Bulletin Board</h5>
                                 <Button variant="link" className="text-decoration-none" onClick={() => navigate('/announcements')}>View All</Button>
@@ -351,8 +430,12 @@ const Dashboard = () => {
                                     ))
                                 ) : (
                                     <div className="text-center py-5">
-                                        <i className="bi bi-mailbox fs-1 text-light mb-2"></i>
-                                        <p className="text-muted">No recent notices found.</p>
+                                        <div className="dashboard-empty-icon mb-3"><i className="bi bi-list-task"></i></div>
+                                        <p className="dashboard-empty-title mb-1">No notices yet</p>
+                                        <p className="dashboard-empty-copy mb-3">Announcements you post will show up here for teachers and parents to see.</p>
+                                        {userData.role?.toLowerCase() === 'admin' && (
+                                            <Button className="dashboard-empty-cta px-3 py-2" onClick={() => navigate('/announcements')}>Post an announcement</Button>
+                                        )}
                                     </div>
                                 )}
                             </Card.Body>
@@ -366,7 +449,7 @@ const Dashboard = () => {
                 <Modal.Header closeButton className="border-0 pb-0">
                     <Modal.Title className="fw-bold">
                         <i className="bi bi-people-fill text-primary me-2"></i>
-                        Class Roster — {teacherStats.className}
+                        Class Roster — {teacherStats.classes && teacherStats.classes.length > 1 ? teacherStats.classes.join(', ') : (teacherStats.className || '')}
                     </Modal.Title>
                 </Modal.Header>
                 <Modal.Body className="pt-2">
@@ -382,6 +465,7 @@ const Dashboard = () => {
                                     <tr>
                                         <th className="ps-3 py-3 border-0">#</th>
                                         <th className="py-3 border-0">Student Name</th>
+                                        <th className="py-3 border-0">Class</th>
                                         <th className="py-3 border-0">Roll No.</th>
                                         <th className="py-3 border-0">Gender</th>
                                     </tr>
@@ -391,6 +475,7 @@ const Dashboard = () => {
                                         <tr key={s.studentId || idx}>
                                             <td className="ps-3 text-muted">{idx + 1}</td>
                                             <td className="fw-bold text-dark">{s.studentName}</td>
+                                            <td><Badge bg="primary" className="bg-opacity-10 text-primary border">{s.studentClass || s.classNo}</Badge></td>
                                             <td><Badge bg="light" className="text-dark border">{s.studentRollNo}</Badge></td>
                                             <td className="text-secondary">{s.studentGender}</td>
                                         </tr>

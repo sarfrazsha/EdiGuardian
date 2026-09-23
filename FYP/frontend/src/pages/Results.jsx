@@ -29,13 +29,19 @@ const Results = () => {
         setLoading(true);
         try {
             const res = await fetch(`/api/results/student/${studentId}`);
+            if (!res.ok) throw new Error('Unable to retrieve results');
             const data = await res.json();
-            setResults(data);
+            const normalizedResults = Array.isArray(data) ? data.map(record => ({
+                ...record,
+                grade: typeof record.grade === 'string' ? { label: record.grade } : record.grade,
+                status: record.status || (['F', 'Fail'].includes(typeof record.grade === 'string' ? record.grade : record.grade?.label) ? 'Failed' : 'Passed')
+            })) : [];
+            setResults(normalizedResults);
             
-            if (data.length > 0) {
+            if (normalizedResults.length > 0) {
                 // Set default tab to the most recently updated result's type
-                setActiveTerm(data[0].examType);
-                setResult(data[0]);
+                setActiveTerm(normalizedResults[0].examType);
+                setResult(normalizedResults[0]);
             } else {
                 setResult(null);
             }

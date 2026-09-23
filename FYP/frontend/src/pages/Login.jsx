@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Container, Form, Button, Row, Col, Card, Alert, Modal, InputGroup, ListGroup } from 'react-bootstrap';
+import { Form, Button, Modal, InputGroup } from 'react-bootstrap';
 
 import { useParams, useNavigate } from 'react-router-dom';
 import AppNavbar from '../components/Navbar';
@@ -41,6 +41,9 @@ const handleSubmit = async (e) => {
             if (data.studentId) localStorage.setItem('studentId', data.studentId);
             if (data.classNo) localStorage.setItem('classNo', data.classNo);
             if (data.teacherClass) localStorage.setItem('teacherClass', data.teacherClass);
+            if (data.teacherClasses) localStorage.setItem('teacherClasses', JSON.stringify(data.teacherClasses));
+            if (data.teacherSubject) localStorage.setItem('teacherSubject', data.teacherSubject);
+            if (data.teacherSubjects) localStorage.setItem('teacherSubjects', JSON.stringify(data.teacherSubjects));
             if (data.children) {
                 localStorage.setItem('parentChildren', JSON.stringify(data.children));
                 if (data.children.length > 0) {
@@ -66,22 +69,21 @@ const handleSubmit = async (e) => {
     
 
     return (
-        <div className="d-flex flex-column min-vh-100">
-            <AppNavbar />
+        <div className="login-page d-flex flex-column min-vh-100">
+            <AppNavbar solid />
 
-            <div
-                className="hero-section flex-grow-1"
-                style={{
-                    backgroundImage: `url(${background})`
-                }}
-            >
-                <div className="hero-overlay"></div>
-                <Container className="hero-content d-flex justify-content-center align-items-center">
-                    <Card className="shadow-lg p-4" style={{ width: '100%', maxWidth: '400px', backgroundColor: 'rgba(255, 255, 255, 0.95)' }}>
-                        <Card.Body>
-                            <h2 className="text-center mb-4 fw-bold" style={{ color: '#4361ee' }}>
-                                <span className="text-capitalize">{role}</span> Login
-                            </h2>
+            <main className="login-hero flex-grow-1" style={{ backgroundImage: `url(${background})` }}>
+                <div className="login-hero-scrim"></div>
+                <div className="login-hero-inner">
+                    <div className="login-left-column">
+                        <section className="login-intro">
+                            <p className="login-eyebrow">EDUGUARDIAN PORTAL</p>
+                            <h1>Stay close to<br /><span>what matters most.</span></h1>
+                        </section>
+
+                        <section className="login-card">
+                            <h2><span className="text-capitalize">{role}</span> Login</h2>
+                            <p className="login-card-subtitle">Sign in to continue to your EduGuardian portal.</p>
                             <Form onSubmit={handleSubmit}>
                                 <Form.Group className="mb-3" controlId="formBasicEmail">
                                     <Form.Label>Email address</Form.Label>
@@ -104,31 +106,33 @@ const handleSubmit = async (e) => {
                                             onChange={(e) => setPassword(e.target.value)}
                                             required
                                             minLength="8"
-                                            className="border-end-0 border-secondary-subtle"
+                                            className="login-input border-end-0"
                                         />
                                         <InputGroup.Text 
                                             onClick={() => setShowPassword(!showPassword)}
-                                            className="bg-white border-start-0 border-secondary-subtle"
+                                            className="login-input-addon border-start-0"
                                             style={{ cursor: 'pointer' }}
                                         >
-                                            <i className={`bi ${showPassword ? 'bi-eye-slash text-primary' : 'bi-eye text-muted'}`}></i>
+                                            <i className={`bi ${showPassword ? 'bi-eye-slash' : 'bi-eye'}`}></i>
                                         </InputGroup.Text>
                                     </InputGroup>
                                 </Form.Group>
 
-                                <Button variant="primary" type="submit" className="w-100 py-2 fw-bold">
+                                <Button type="submit" className="login-submit w-100 py-2 fw-bold">
                                     Login
                                 </Button>
                             </Form>
-                            <div className="text-center mt-3">
-                                <Button variant="link" onClick={() => navigate('/')} className="text-decoration-none">
-                                    &larr; Back to Home
-                                </Button>
+                            <div className="text-center mt-4">
+                                <button type="button" onClick={() => navigate('/')} className="login-back-link">
+                                    &larr; Back to home
+                                </button>
                             </div>
-                        </Card.Body>
-                    </Card>
-                </Container>
-            </div>
+                        </section>
+
+                        <p className="login-intro-copy login-copy-below">A calmer way to stay connected with your child's learning, progress, and everyday school life.</p>
+                    </div>
+                </div>
+            </main>
             <div>
                     
                                 <Modal show={showSuccessModal} onHide={() => setShowSuccessModal(false)} centered>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Container, Table, Card, Button, Badge, Spinner, Nav } from 'react-bootstrap';
+import { Container, Table, Card, Button, Spinner, Nav } from 'react-bootstrap';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import Axios from 'axios';
@@ -9,47 +9,49 @@ const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
 const Schedule = () => {
     const navigate = useNavigate();
     const userRole = localStorage.getItem('userRole');
+    const isTeacher = userRole?.toLowerCase() === 'teacher';
     const userEmail = localStorage.getItem('userEmail');
     const cNo = localStorage.getItem('classNo');
     const selectedChildClass = localStorage.getItem('selectedChildClass');
-    const userClass = (userRole?.toLowerCase() === 'parent' && selectedChildClass) ? selectedChildClass : (cNo || localStorage.getItem('userClass'));
-    
+
+    const userClass = (userRole?.toLowerCase() === 'parent' && selectedChildClass)
+        ? selectedChildClass
+        : (cNo || localStorage.getItem('userClass'));
+
+    // Students/parents: one class's full timetable. Teachers: their own
+    // periods aggregated across every class they teach - a different shape,
+    // so it gets its own state rather than being forced into `schedule`.
     const [schedule, setSchedule] = useState(null);
+    const [teacherTimetable, setTeacherTimetable] = useState(null);
     const [loading, setLoading] = useState(true);
     const [activeDay, setActiveDay] = useState(new Date().toLocaleDateString('en-US', { weekday: 'long' }));
 
     useEffect(() => {
         if (!DAYS.includes(activeDay)) setActiveDay('Monday');
+    }, []);
+
+    useEffect(() => {
         fetchSchedule();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const fetchSchedule = async () => {
-        let targetClass = userClass;
-        
-        // Try to get class from localStorage first for immediate results
-        if (userRole === 'teacher') {
-            targetClass = localStorage.getItem('teacherClass');
-            if (!targetClass) {
-                try {
-                    const stats = await Axios.get(`/api/teacher/stats/${userEmail}`);
-                    targetClass = stats.data.className;
-                    if (targetClass) localStorage.setItem('teacherClass', targetClass);
-                } catch (err) {
-                    console.error("Error fetching teacher class:", err);
-                }
-            }
-        }
-
-        if (targetClass) {
-            try {
-                const res = await Axios.get(`/api/schedule/${targetClass}`);
+        setLoading(true);
+        try {
+            if (isTeacher) {
+                const res = await Axios.get(`/api/teacher/timetable/${userEmail}`);
+                setTeacherTimetable(res.data);
+            } else if (userClass) {
+                const res = await Axios.get(`/api/schedule/${userClass}`);
                 setSchedule(res.data);
-            } catch (err) {
-                console.error("Error fetching schedule:", err);
-            } finally {
-                setLoading(false);
+            } else {
+                setSchedule(null);
             }
-        } else {
+        } catch (err) {
+            console.error("Error fetching schedule:", err);
+            setSchedule(null);
+            setTeacherTimetable(null);
+        } finally {
             setLoading(false);
         }
     };
@@ -69,23 +71,31 @@ const Schedule = () => {
         return 'subject-default';
     };
 
-    const currentDaySchedule = schedule?.days?.find(d => d.day === activeDay);
+    const currentDaySchedule = isTeacher
+        ? teacherTimetable?.days?.find(d => d.day === activeDay)
+        : schedule?.days?.find(d => d.day === activeDay);
 
     return (
         <Layout>
             <Container fluid className="py-4">
-                <div className="d-flex align-items-center gap-3 mb-4">
-                    <Button 
-                        variant="light" 
-                        className="rounded-circle shadow-sm border p-0 d-flex align-items-center justify-content-center" 
-                        style={{ width: '40px', height: '40px' }} 
-                        onClick={() => navigate(-1)}
-                    >
-                        <i className="bi bi-arrow-left fs-5"></i>
-                    </Button>
-                    <div>
-                        <h2 className="fw-bold mb-0 text-dark">Class Timetable</h2>
-                        <p className="text-muted small mb-0">{userClass || schedule?.classNo || 'Primary'} Schedule</p>
+                <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+                    <div className="d-flex align-items-center gap-3">
+                        <Button 
+                            variant="light" 
+                            className="rounded-circle shadow-sm border p-0 d-flex align-items-center justify-content-center" 
+                            style={{ width: '40px', height: '40px' }} 
+                            onClick={() => navigate(-1)}
+                        >
+                            <i className="bi bi-arrow-left fs-5"></i>
+                        </Button>
+                        <div>
+                            <h2 className="fw-bold mb-0 text-dark">{isTeacher ? 'My Timetable' : 'Class Timetable'}</h2>
+                            <p className="text-muted small mb-0">
+                                {isTeacher
+                                    ? `${teacherTimetable?.teacherName || 'Your'} scheduled classes`
+                                    : `${userClass || schedule?.classNo || 'Primary'} Schedule`}
+                            </p>
+                        </div>
                     </div>
                 </div>
 
@@ -107,7 +117,7 @@ const Schedule = () => {
                     <div className="text-center py-5">
                         <Spinner animation="border" variant="primary" />
                     </div>
-                ) : schedule ? (
+                ) : (isTeacher ? teacherTimetable : schedule) ? (
                     <Card className="border-0 shadow-sm rounded-4 overflow-hidden mb-4">
                         <Card.Body className="p-0">
                             <Table responsive hover className="mb-0 align-middle">
@@ -115,6 +125,7 @@ const Schedule = () => {
                                     <tr>
                                         <th className="ps-4 py-3" style={{ width: '200px' }}>Time</th>
                                         <th className="py-3">Subject</th>
+                                        {isTeacher && <th className="py-3">Class</th>}
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -129,11 +140,14 @@ const Schedule = () => {
                                                     {period.subject}
                                                 </div>
                                             </td>
+                                            {isTeacher && (
+                                                <td className="fw-bold text-dark">{period.classNo}</td>
+                                            )}
                                         </tr>
                                     ))}
                                     {(!currentDaySchedule || currentDaySchedule.periods.length === 0) && (
                                         <tr>
-                                            <td colSpan="2" className="text-center py-5 text-muted">
+                                            <td colSpan={isTeacher ? 3 : 2} className="text-center py-5 text-muted">
                                                 No classes scheduled for {activeDay}.
                                             </td>
                                         </tr>
@@ -148,7 +162,9 @@ const Schedule = () => {
                             <i className="bi bi-calendar-x display-1 text-warning mb-4 d-block"></i>
                             <h3 className="fw-bold text-dark">Schedule Not Available</h3>
                             <p className="text-muted mx-auto mb-0" style={{ maxWidth: '400px' }}>
-                                The timetable for your class has not been published by the administration yet.
+                                {isTeacher
+                                    ? "You don't have any periods scheduled yet."
+                                    : 'The timetable for your class has not been published by the administration yet.'}
                             </p>
                         </Card.Body>
                     </Card>
@@ -156,7 +172,7 @@ const Schedule = () => {
             </Container>
 
             <style>{`
-                .nav-pills .nav-link.active { background-color: #0d6efd; box-shadow: 0 4px 12px rgba(13, 110, 253, 0.25); }
+                .nav-pills .nav-link.active { background-color: rgb(145, 105, 110); box-shadow: 0 4px 12px rgba(125, 78, 84, 0.25); }
                 .nav-pills .nav-link { color: #6c757d; }
                 .subject-badge {
                     padding: 8px 16px;
@@ -171,7 +187,7 @@ const Schedule = () => {
                 .subject-english { background-color: #ecfdf5; color: #047857; }
                 .subject-science { background-color: #f0f9ff; color: #0369a1; }
                 .subject-urdu { background-color: #fffbeb; color: #b45309; }
-                .subject-islami { background-color: #f5f3ff; color: #7c3aed; }
+                .subject-islami { background-color: rgba(145, 105, 110, .1); color: rgb(125, 78, 84); }
                 .subject-social { background-color: #fff7ed; color: #c2410c; }
                 .subject-art { background-color: #fdf2f8; color: #be185d; }
                 .subject-pe { background-color: #f8fafc; color: #334155; }

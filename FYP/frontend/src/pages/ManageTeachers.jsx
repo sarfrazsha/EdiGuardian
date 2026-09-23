@@ -25,9 +25,17 @@ const ManageTeachers = () => {
         profilePicture: '',
         phoneNumber: '',
         address: '',
-
+        subject: 'Mathematics'
     });
 
+    const SUBJECT_OPTIONS = [
+        'Mathematics',
+        'English',
+        'Urdu',
+        'Physics',
+        'Chemistry',
+        'Computer Science'
+    ];
 
     const fetchTeachers = async () => {
         setLoading(true);
@@ -45,7 +53,6 @@ const ManageTeachers = () => {
 
     useEffect(() => { fetchTeachers(); }, []);
 
-
     useEffect(() => {
         if (location.state?.openAdd) {
             handleShowAdd();
@@ -61,6 +68,7 @@ const ManageTeachers = () => {
             profilePicture: '',
             phoneNumber: '',
             address: '',
+            subject: 'Mathematics',
             role: 'Teacher'
         });
         setShowModal(true);
@@ -75,7 +83,8 @@ const ManageTeachers = () => {
             phoneNumber: teacher.phoneNumber || teacher.teacherContact || '',
             address: teacher.address || teacher.teacherAddress || '',
             profilePicture: null,
-            password: teacher.teacherPassword || ''
+            password: teacher.teacherPassword || '',
+            subject: teacher.subject || 'Mathematics'
         });
         setShowModal(true);
     };
@@ -89,6 +98,7 @@ const ManageTeachers = () => {
             data.append('email', formData.email);
             data.append('phoneNumber', formData.phoneNumber);
             data.append('address', formData.address);
+            data.append('subject', formData.subject || 'General');
             if (formData.password) {
                 data.append('password', formData.password);
             }
@@ -139,12 +149,14 @@ const ManageTeachers = () => {
                         </Button>
                         <div>
                             <h2 className="fw-bold mb-0 text-dark">Faculty Management</h2>
-
+                            <p className="text-muted small mb-0">Manage teaching staff, subjects, and classroom assignments</p>
                         </div>
                     </div>
-                    <Button variant="success" className="rounded-pill px-4 shadow-sm" onClick={handleShowAdd}>
-                        <i className="bi bi-person-plus-fill me-2"></i>Add Faculty Member
-                    </Button>
+                    <div className="d-flex gap-2">
+                        <Button variant="success" className="rounded-pill px-4 shadow-sm" onClick={handleShowAdd}>
+                            <i className="bi bi-person-plus-fill me-2"></i>Add Faculty Member
+                        </Button>
+                    </div>
                 </div>
 
                 <Card className="border-0 shadow-sm rounded-4 overflow-hidden">
@@ -159,13 +171,13 @@ const ManageTeachers = () => {
                                 <thead className="bg-light text-secondary small text-uppercase">
                                     <tr>
                                         <th className="ps-4 py-3">Teacher Details</th>
+                                        <th className="py-3">Subject Specialization</th>
                                         <th className="py-3">Contact Email</th>
-                                        <th className="py-3">Class</th>
                                         <th className="text-end pe-4 py-3">Management</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {teachers.map(t => (
+                                    {teachers.length > 0 ? teachers.map(t => (
                                         <tr key={t._id}>
                                             <td className="ps-4">
                                                 <div className="d-flex align-items-center">
@@ -182,12 +194,12 @@ const ManageTeachers = () => {
                                                     </div>
                                                 </div>
                                             </td>
-                                            <td className="text-muted small">{t.email}</td>
                                             <td>
-                                                <Badge bg="success" className="bg-opacity-10 text-success fw-normal px-3">
-                                                    {t.class || 'Not Assigned'}
+                                                <Badge bg="primary" className="bg-opacity-10 text-primary fw-bold px-3 py-2 rounded-pill border border-primary border-opacity-25">
+                                                    <i className="bi bi-book-half me-1"></i>{t.subject || 'General'}
                                                 </Badge>
                                             </td>
+                                            <td className="text-muted small">{t.email}</td>
                                             <td className="text-end pe-4">
                                                 <Button variant="light" size="sm" className="me-2 text-primary border" onClick={() => handleShowEdit(t)}>
                                                     <i className="bi bi-pencil-square"></i>
@@ -197,7 +209,14 @@ const ManageTeachers = () => {
                                                 </Button>
                                             </td>
                                         </tr>
-                                    ))}
+                                    )) : (
+                                        <tr>
+                                            <td colSpan="4" className="text-center py-5 text-muted">
+                                                <i className="bi bi-person-x fs-1 d-block mb-2 text-secondary opacity-50"></i>
+                                                No faculty members found. Click "Add Faculty Member" to register a new teacher with their subject.
+                                            </td>
+                                        </tr>
+                                    )}
                                 </tbody>
                             </Table>
                         )}
@@ -214,14 +233,59 @@ const ManageTeachers = () => {
                 </Modal.Header>
                 <Form onSubmit={handleSave}>
                     <Modal.Body className="pt-3">
+                        <Alert variant="info" className="py-2 px-3 small border-0 rounded-3 d-flex align-items-center mb-3 bg-primary bg-opacity-10 text-primary">
+                            <i className="bi bi-info-circle-fill me-2 fs-6"></i>
+                            <div><strong>Subject Specialization:</strong> This teacher will be restricted to marking attendance and grading for their assigned subject.</div>
+                        </Alert>
+
                         <Form.Group className="mb-3">
                             <Form.Label className="small fw-bold">Full Name</Form.Label>
                             <Form.Control
                                 required
+                                placeholder="e.g. Dr. Muhammad Ahmed"
                                 value={formData.teacherName}
                                 onChange={e => setFormData({ ...formData, teacherName: e.target.value })}
                             />
                         </Form.Group>
+
+                        <Form.Group className="mb-3">
+                            <Form.Label className="small fw-bold d-flex align-items-center">
+                                <i className="bi bi-book-half text-primary me-2"></i>
+                                <span>Subject Specialization <span className="text-danger">*</span></span>
+                            </Form.Label>
+                            <Form.Select
+                                required
+                                className="shadow-sm border"
+                                value={SUBJECT_OPTIONS.includes(formData.subject) ? formData.subject : 'Other'}
+                                onChange={e => {
+                                    const val = e.target.value;
+                                    if (val === 'Other') {
+                                        setFormData({ ...formData, subject: '' });
+                                    } else {
+                                        setFormData({ ...formData, subject: val });
+                                    }
+                                }}
+                            >
+                                {SUBJECT_OPTIONS.map(subj => (
+                                    <option key={subj} value={subj}>{subj}</option>
+                                ))}
+                                <option value="Other">Other (Type Custom Subject)...</option>
+                            </Form.Select>
+                            {(!SUBJECT_OPTIONS.includes(formData.subject) || formData.subject === '') && (
+                                <Form.Control
+                                    type="text"
+                                    className="mt-2 shadow-sm"
+                                    placeholder="Enter custom subject name (e.g. Statistics, Economics)"
+                                    value={formData.subject}
+                                    onChange={e => setFormData({ ...formData, subject: e.target.value })}
+                                    required
+                                />
+                            )}
+                            <Form.Text className="text-muted" style={{ fontSize: '11px' }}>
+                                The teacher will only be authorized to mark attendance and grade papers for this subject.
+                            </Form.Text>
+                        </Form.Group>
+
                         <Form.Group className="mb-3">
                             <Form.Label className="small fw-bold">Official Email</Form.Label>
                             <Form.Control

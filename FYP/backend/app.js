@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require("express");
 const cors = require("cors");
 const { v4: uuidv4 } = require('uuid');
@@ -6,6 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 const app = express();
 const mongoose = require("mongoose");
 const fs = require('fs');
+const crypto = require('crypto');
 const port = 8080;
 const path = require("path");
 
@@ -56,6 +58,11 @@ const Homework = require("./models/homework");
 const HomeworkSubmission = require("./models/homework_submission");
 const Schedule = require("./models/schedule");
 const Datesheet = require("./models/datesheet");
+const TeacherAssignment = require("./models/teacher_assignment");
+const Payment = require("./models/payment");
+const notifications = require("./services/notifications");
+const { verifyConnection: verifyEmailConnection } = require("./services/mailer");
+const { runDailyChecks, scheduleDailyChecks } = require("./jobs/dailyChecks");
 
 
 
@@ -68,7 +75,296 @@ main()
     })
 async function main() {
     await mongoose.connect(link);
+    await migrateLegacyTeacherAssignments();
+    await verifyEmailConnection();
+    scheduleDailyChecks();
+}
 
+function parseTimeToMinutes(timeStr) {
+    if (!timeStr) return null;
+    const parts = String(timeStr).trim().split(':');
+    if (parts.length < 2) return null;
+    const h = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10);
+    if (isNaN(h) || isNaN(m)) return null;
+    return h * 60 + m;
+}
+
+function parsePeriodInterval(period) {
+    let startMin = null;
+    let endMin = null;
+
+    if (period.startTime && period.endTime) {
+        startMin = parseTimeToMinutes(period.startTime);
+        endMin = parseTimeToMinutes(period.endTime);
+    } else if (period.time && period.time.includes('-')) {
+        const [s, e] = period.time.split('-');
+        startMin = parseTimeToMinutes(s);
+        endMin = parseTimeToMinutes(e);
+    }
+
+    return { startMin, endMin };
+}
+
+function doIntervalsOverlap(start1, end1, start2, end2) {
+    if (start1 === null || end1 === null || start2 === null || end2 === null) return false;
+    return start1 < end2 && start2 < end1;
+}
+
+function normalizeSubject(subject) {
+    return String(subject || '').trim().toLowerCase();
+}
+
+function classLabel(cls) {
+    if (!cls) return '';
+    return `${cls.className} - ${cls.section}`;
+}
+
+function labelsMatch(a, b) {
+    const na = String(a || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const nb = String(b || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    return na === nb;
+}
+
+function teacherQualifiedSubjects(teacher) {
+    const list = [teacher?.subject, ...(teacher?.subjects || [])].filter(Boolean).map(s => String(s).trim());
+    return [...new Set(list)];
+}
+
+function teacherCanTeach(teacher, subject) {
+    const key = normalizeSubject(subject);
+    if (!key) return false;
+    const subjects = teacherQualifiedSubjects(teacher).map(normalizeSubject);
+    return subjects.includes(key) || subjects.includes('all subjects');
+}
+
+async function findClassByLabel(classNo) {
+    const trimmed = String(classNo || '').trim();
+    if (!trimmed) return null;
+    const classes = await Class.find({}).lean();
+    return classes.find(c => labelsMatch(classLabel(c), trimmed) || labelsMatch(c.className, trimmed)) || null;
+}
+
+// Adds one period to a class's timetable, running the same conflict checks
+// POST /api/schedule uses (in-class overlap, cross-class teacher double-booking).
+// Shared by /api/schedule and the quick "assign teacher" flow in Manage Classes,
+// so an assignment's period always lands in the timetable the same validated way.
+async function addPeriodToClassSchedule({ classNoLabel, day, startTime, endTime, subject, teacherName, teacherEmail }) {
+    const { startMin, endMin } = parsePeriodInterval({ startTime, endTime });
+    if (startMin === null || endMin === null || startMin >= endMin) {
+        return { ok: false, status: 400, message: 'A valid start and end time are required for the period.' };
+    }
+
+    const newPeriod = {
+        time: `${startTime} - ${endTime}`,
+        startTime,
+        endTime,
+        subject,
+        teacher: teacherName || '',
+        teacherEmail: (teacherEmail || '').toLowerCase()
+    };
+
+    let schedule = await Schedule.findOne({ classNo: classNoLabel });
+    const dayEntry = schedule?.days?.find(d => d.day === day);
+
+    // In-class overlap: this class must not already have a period on this day
+    // that overlaps the new one.
+    if (dayEntry) {
+        for (const p of dayEntry.periods || []) {
+            const { startMin: s2, endMin: e2 } = parsePeriodInterval(p);
+            if (doIntervalsOverlap(startMin, endMin, s2, e2)) {
+                return {
+                    ok: false, status: 409,
+                    message: `Conflict: Class ${classNoLabel} already has a period on ${day} (${p.time}) overlapping ${newPeriod.time}.`
+                };
+            }
+        }
+    }
+
+    // Cross-class collision: this teacher must not already be booked elsewhere
+    // on this day at an overlapping time.
+    if (newPeriod.teacherEmail) {
+        const otherSchedules = await Schedule.find({ classNo: { $ne: classNoLabel } }).lean();
+        for (const otherSch of otherSchedules) {
+            const otherDay = (otherSch.days || []).find(od => od.day === day);
+            if (!otherDay) continue;
+            for (const op of (otherDay.periods || [])) {
+                if ((op.teacherEmail || '').toLowerCase() !== newPeriod.teacherEmail) continue;
+                const { startMin: s2, endMin: e2 } = parsePeriodInterval(op);
+                if (doIntervalsOverlap(startMin, endMin, s2, e2)) {
+                    return {
+                        ok: false, status: 409,
+                        message: `Scheduling Conflict: ${teacherName || teacherEmail} is already teaching Class ${otherSch.classNo} on ${day} during ${op.time}.`
+                    };
+                }
+            }
+        }
+    }
+
+    if (!schedule) {
+        schedule = new Schedule({ classNo: classNoLabel, days: [] });
+    }
+    let targetDay = schedule.days.find(d => d.day === day);
+    if (!targetDay) {
+        schedule.days.push({ day, periods: [] });
+        targetDay = schedule.days[schedule.days.length - 1];
+    }
+    targetDay.periods.push(newPeriod);
+    await schedule.save();
+
+    return { ok: true, period: newPeriod };
+}
+
+// Removes every period matching this class/subject/teacher from the timetable.
+// Used when a teacher assignment is removed, so the timetable doesn't keep
+// showing periods for a teacher who is no longer assigned to that subject.
+async function removeSchedulePeriodsForAssignment({ classNoLabel, subjectKey, teacherEmail }) {
+    const schedule = await Schedule.findOne({ classNo: classNoLabel });
+    if (!schedule) return 0;
+    const cleanEmail = (teacherEmail || '').toLowerCase();
+    let removed = 0;
+    schedule.days.forEach(d => {
+        const before = d.periods.length;
+        d.periods = d.periods.filter(p =>
+            !(normalizeSubject(p.subject) === subjectKey && (p.teacherEmail || '').toLowerCase() === cleanEmail)
+        );
+        removed += before - d.periods.length;
+    });
+    if (removed > 0) await schedule.save();
+    return removed;
+}
+
+async function collectTeacherAssignmentPairs(email) {
+    const cleanEmail = String(email || '').toLowerCase().trim();
+    const teacher = await Teacher.findOne({ teacherEmail: cleanEmail }).lean();
+    if (!teacher) return { teacher: null, list: [] };
+
+    const assignmentsSet = new Map();
+
+    const allSchedules = await Schedule.find({}).lean();
+    allSchedules.forEach(sch => {
+        sch.days?.forEach(day => {
+            day.periods?.forEach(p => {
+                const matchEmail = p.teacherEmail && p.teacherEmail.toLowerCase() === cleanEmail;
+                const matchName = p.teacher && teacher.teacherName && p.teacher.trim().toLowerCase() === teacher.teacherName.trim().toLowerCase();
+                if (matchEmail || matchName) {
+                    const subject = p.subject || teacher.subject || 'General';
+                    assignmentsSet.set(`${sch.classNo}_${normalizeSubject(subject)}`, {
+                        classNo: sch.classNo,
+                        subject
+                    });
+                }
+            });
+        });
+    });
+
+    const dbAssignments = await TeacherAssignment.find({ teacherEmail: cleanEmail }).populate('classId', 'className section').lean();
+    dbAssignments.forEach(a => {
+        if (!a.classId) return;
+        const label = classLabel(a.classId);
+        const subject = a.subject || teacher.subject || 'General';
+        const key = `${label}_${normalizeSubject(subject)}`;
+        if (!assignmentsSet.has(key)) {
+            assignmentsSet.set(key, { classNo: label, subject });
+        }
+    });
+
+    const legacyClasses = await Class.find({ teacherEmail: cleanEmail }).lean();
+    legacyClasses.forEach(c => {
+        const label = classLabel(c);
+        const subject = teacher.subject || 'General';
+        const key = `${label}_${normalizeSubject(subject)}`;
+        if (!assignmentsSet.has(key)) {
+            assignmentsSet.set(key, { classNo: label, subject });
+        }
+    });
+
+    return { teacher, list: Array.from(assignmentsSet.values()) };
+}
+
+async function teacherAuthorizedForClassSubject(email, classNo, subject) {
+    const { teacher, list } = await collectTeacherAssignmentPairs(email);
+    if (!teacher) return { ok: false, message: 'Teacher not found.' };
+
+    const subjectOk = list.some(item => labelsMatch(item.classNo, classNo) && normalizeSubject(item.subject) === normalizeSubject(subject));
+    if (!subjectOk) {
+        return {
+            ok: false,
+            teacher,
+            message: `You are not assigned to teach ${subject} in ${classNo}.`
+        };
+    }
+
+    if (!teacherCanTeach(teacher, subject)) {
+        return {
+            ok: false,
+            teacher,
+            message: `You are only authorized for ${teacher.subject || 'your assigned subject'}, not ${subject}.`
+        };
+    }
+
+    return { ok: true, teacher };
+}
+
+async function migrateLegacyTeacherAssignments() {
+    try {
+        // Normalise and de-duplicate existing docs first. Docs written before
+        // subjectKey existed do not match the unique index, so backfilling them
+        // after the upserts below would collide and abort the whole migration.
+        const docs = await TeacherAssignment.find({}).sort({ createdAt: 1 });
+        const seen = new Map();
+        const needsBackfill = [];
+        for (const doc of docs) {
+            const subject = doc.subject || 'General';
+            const subjectKey = doc.subjectKey || normalizeSubject(subject);
+            const key = `${doc.classId}|${doc.academicYear}|${subjectKey}`;
+            if (seen.has(key)) {
+                await TeacherAssignment.deleteOne({ _id: doc._id });
+                continue;
+            }
+            seen.set(key, doc._id);
+            if (!doc.subjectKey) needsBackfill.push({ doc, subject, subjectKey });
+        }
+        // Backfill only once every duplicate is gone, otherwise writing the key
+        // onto an older doc collides with a newer duplicate still in the way.
+        for (const { doc, subject, subjectKey } of needsBackfill) {
+            doc.subjectKey = subjectKey;
+            doc.subject = subject;
+            await doc.save();
+        }
+
+        const legacyClasses = await Class.find({ teacherEmail: { $exists: true, $nin: ['', null] } }).lean();
+        for (const legacyClass of legacyClasses) {
+            const teacher = await Teacher.findOne({ teacherEmail: legacyClass.teacherEmail }).select('_id teacherEmail subject');
+            if (!teacher) continue;
+            const subject = teacher.subject || 'General';
+            await TeacherAssignment.updateOne(
+                { classId: legacyClass._id, academicYear: '2025-26', subjectKey: normalizeSubject(subject) },
+                {
+                    $setOnInsert: {
+                        teacherId: teacher._id,
+                        teacherEmail: teacher.teacherEmail,
+                        subject
+                    }
+                },
+                { upsert: true }
+            );
+        }
+
+        await TeacherAssignment.syncIndexes();
+    } catch (err) {
+        console.error("Migration error:", err);
+    }
+}
+
+async function getTeacherAssignedClasses(email) {
+    try {
+        const { list } = await collectTeacherAssignmentPairs(email);
+        return [...new Set(list.map(item => item.classNo))];
+    } catch (err) {
+        console.error("Error in getTeacherAssignedClasses:", err);
+        return [];
+    }
 }
 
 // Update Profile Picture
@@ -179,12 +475,25 @@ app.get("/users", async (req, res) => {
 
 
 
+    // Grouped by paidAt (when the money actually came in), not by the fee's
+    // `month`/`year` fields (which name the billing period a voucher is FOR -
+    // e.g. a "May" voucher paid in June should count toward June's total,
+    // not May's). Scoped to the current year for the same reason as before:
+    // otherwise September 2025 and September 2026 payments would merge.
+    const currentYear = new Date().getFullYear();
+    const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     const monthlyFeeData = await Fee.aggregate([
-        { $match: { status: 'Paid' } },
-        { $group: { _id: '$month', total: { $sum: '$amount' } } }
+        {
+            $match: {
+                status: 'Paid',
+                paidAt: { $ne: null },
+                $expr: { $eq: [{ $year: '$paidAt' }, currentYear] }
+            }
+        },
+        { $group: { _id: { $month: '$paidAt' }, total: { $sum: '$amount' } } }
     ]);
     const monthlyFeeStats = monthlyFeeData.map(item => ({
-        month: item._id,
+        month: MONTH_NAMES[item._id - 1],
         total: item.total
     }));
 
@@ -209,13 +518,12 @@ app.get("/users", async (req, res) => {
 app.get("/api/teacher/stats/:email", async (req, res) => {
     try {
         const { email } = req.params;
-        const teacherClass = await Class.findOne({ teacherEmail: email });
-        if (!teacherClass) {
+        const assignedClasses = await getTeacherAssignedClasses(email);
+        if (assignedClasses.length === 0) {
             return res.json({ students: 0, attendanceToday: 0, className: 'Not Assigned' });
         }
 
-        const className = `${teacherClass.className} - ${teacherClass.section}`;
-        const studentsCount = await Student.countDocuments({ classNo: className });
+        const studentsCount = await Student.countDocuments({ classNo: { $in: assignedClasses } });
 
         // Get start and end of today
         const startOfDay = new Date();
@@ -224,7 +532,7 @@ app.get("/api/teacher/stats/:email", async (req, res) => {
         endOfDay.setHours(23, 59, 59, 999);
 
         const attendanceRecords = await Attendance.find({
-            classNo: className,
+            classNo: { $in: assignedClasses },
             date: { $gte: startOfDay, $lte: endOfDay }
         });
 
@@ -239,28 +547,45 @@ app.get("/api/teacher/stats/:email", async (req, res) => {
         res.json({
             students: studentsCount,
             attendanceToday: attendancePercentage,
-            className: className
+            className: assignedClasses[0],
+            classes: assignedClasses
         });
     } catch (err) {
         res.status(500).json({ message: "Error fetching teacher stats" });
     }
 });
 
+app.get("/api/students/teacher/:email", async (req, res) => {
+    try {
+        const assignedClasses = await getTeacherAssignedClasses(req.params.email);
+        const students = await Student.find({ classNo: { $in: assignedClasses } }).lean();
+        res.json(students.map(student => ({
+            ...student,
+            id: student._id,
+            studentProfilePicture: sanitizePath(student.studentImage),
+            studentClass: student.classNo
+        })));
+    } catch (err) {
+        console.error('Error fetching teacher students:', err);
+        res.status(500).json({ message: 'Error fetching teacher students' });
+    }
+});
+
 app.get("/api/reports/teacher/:email", async (req, res) => {
     try {
         const { email } = req.params;
-        const teacherClass = await Class.findOne({ teacherEmail: email });
-        if (!teacherClass) return res.status(404).json({ message: "No class assigned" });
+        const assignedClasses = await getTeacherAssignedClasses(email);
+        if (assignedClasses.length === 0) return res.status(404).json({ message: "No class assigned" });
 
-        const className = `${teacherClass.className} - ${teacherClass.section}`;
-        const students = await Student.find({ classNo: className });
+        const className = assignedClasses.join(', ');
+        const students = await Student.find({ classNo: { $in: assignedClasses } });
 
         const now = new Date();
         const firstDayLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
         const lastDayLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
 
         const attendanceRecords = await Attendance.find({
-            classNo: className,
+            classNo: { $in: assignedClasses },
             date: {
                 $gte: firstDayLastMonth,
                 $lte: lastDayLastMonth
@@ -295,21 +620,61 @@ app.get("/api/reports/teacher/:email", async (req, res) => {
 app.get("/api/classes", async (req, res) => {
     try {
         const classes = await Class.find({}).lean();
-        const teacherEmails = classes.map(c => c.teacherEmail).filter(Boolean);
+        const assignments = await TeacherAssignment.find({ classId: { $in: classes.map(c => c._id) } }).lean();
+        const teacherEmails = [...new Set([
+            ...classes.map(c => c.teacherEmail),
+            ...assignments.map(a => a.teacherEmail)
+        ].filter(Boolean))];
         const teachers = await Teacher.find({ teacherEmail: { $in: teacherEmails } }).lean();
         const teacherByEmail = teachers.reduce((map, t) => {
             map[t.teacherEmail] = t.teacherName;
             return map;
         }, {});
+        const schedules = await Schedule.find({ classNo: { $in: classes.map(c => classLabel(c)) } }).lean();
+        const scheduleByClassNo = schedules.reduce((map, s) => {
+            map[s.classNo] = s;
+            return map;
+        }, {});
 
-        res.status(200).json(classes.map(c => ({
-            id: c._id,
-            _id: c._id,
-            name: c.className,
-            section: c.section,
-            teacher: teacherByEmail[c.teacherEmail] || c.teacherId || 'Unassigned',
-            teacherEmail: c.teacherEmail
-        })));
+        res.status(200).json(classes.map(c => {
+            const classNoLabel = classLabel(c);
+            const sched = scheduleByClassNo[classNoLabel];
+            const classAssignments = assignments
+                .filter(a => String(a.classId) === String(c._id))
+                .map(a => {
+                    const periods = [];
+                    if (sched) {
+                        (sched.days || []).forEach(d => {
+                            (d.periods || []).forEach(p => {
+                                if (normalizeSubject(p.subject) === a.subjectKey &&
+                                    (p.teacherEmail || '').toLowerCase() === (a.teacherEmail || '').toLowerCase()) {
+                                    periods.push({ day: d.day, time: p.time });
+                                }
+                            });
+                        });
+                    }
+                    return {
+                        id: a._id,
+                        teacherEmail: a.teacherEmail,
+                        teacherName: teacherByEmail[a.teacherEmail] || a.teacherEmail,
+                        subject: a.subject,
+                        periods
+                    };
+                });
+            const teacherSummary = classAssignments.length
+                ? classAssignments.map(a => `${a.teacherName} (${a.subject})`).join(', ')
+                : (teacherByEmail[c.teacherEmail] || c.teacherId || 'Unassigned');
+            return {
+                id: c._id,
+                _id: c._id,
+                name: c.className,
+                section: c.section,
+                teacher: teacherSummary,
+                teacherEmail: c.teacherEmail,
+                teacherEmails: classAssignments.map(a => a.teacherEmail),
+                assignments: classAssignments
+            };
+        }));
     } catch (err) {
         res.status(500).json({ message: "Error fetching classes" });
     }
@@ -352,6 +717,7 @@ app.delete("/api/classes/:id", async (req, res) => {
     try {
         const { id } = req.params;
         await Class.findByIdAndDelete(id);
+        await TeacherAssignment.deleteMany({ classId: id });
         res.json({ message: "Class deleted successfully" });
     } catch (err) {
         res.status(500).json({ message: "Error deleting class" });
@@ -361,12 +727,144 @@ app.delete("/api/classes/:id", async (req, res) => {
 app.get("/api/teachers/unassigned", async (req, res) => {
     try {
         const teachers = await Teacher.find({}).lean();
+        const assignments = await TeacherAssignment.find({}).lean();
         const classes = await Class.find({}).lean();
-        const assignedEmails = classes.map(c => c.teacherEmail);
+        const assignedEmails = [...assignments.map(a => a.teacherEmail), ...classes.map(c => c.teacherEmail)];
         const unassigned = teachers.filter(t => !assignedEmails.includes(t.teacherEmail));
         res.json(unassigned);
     } catch (err) {
         res.status(500).json({ message: "Error fetching unassigned teachers" });
+    }
+});
+
+app.get("/api/teacher-assignments", async (req, res) => {
+    try {
+        const filter = {};
+        if (req.query.teacherEmail) filter.teacherEmail = req.query.teacherEmail.toLowerCase();
+        if (req.query.classId) filter.classId = req.query.classId;
+        const assignments = await TeacherAssignment.find(filter)
+            .populate('classId', 'className section')
+            .populate('teacherId', 'teacherName teacherEmail subject')
+            .lean();
+        res.json(assignments);
+    } catch (err) {
+        res.status(500).json({ message: 'Error fetching teacher assignments' });
+    }
+});
+
+const SCHEDULE_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+app.post("/api/teacher-assignments", async (req, res) => {
+    try {
+        const { teacherEmail, classId, academicYear = '2025-26', day, startTime, endTime } = req.body;
+        const teacher = await Teacher.findOne({ teacherEmail: String(teacherEmail || '').toLowerCase() });
+        const classRecord = await Class.findById(classId);
+        if (!teacher || !classRecord) return res.status(404).json({ message: 'Teacher or class not found.' });
+
+        const subject = String(req.body.subject || teacher.subject || '').trim();
+        if (!subject) return res.status(400).json({ message: 'Subject is required for teacher assignment.' });
+        if (!teacherCanTeach(teacher, subject)) {
+            return res.status(403).json({
+                message: `${teacher.teacherName} teaches ${teacher.subject || 'a different subject'} and cannot be assigned to ${subject}.`
+            });
+        }
+
+        if (!SCHEDULE_DAYS.includes(day) || !startTime || !endTime) {
+            return res.status(400).json({ message: 'A day and start/end time are required so this assignment can be added to the timetable.' });
+        }
+
+        const subjectKey = normalizeSubject(subject);
+        const existingSubject = await TeacherAssignment.findOne({ classId, academicYear, subjectKey }).populate('teacherId', 'teacherName');
+        if (existingSubject) {
+            const holder = existingSubject.teacherId?.teacherName || existingSubject.teacherEmail;
+            if (String(existingSubject.teacherId?._id || existingSubject.teacherId) === String(teacher._id)) {
+                return res.status(409).json({ message: `${teacher.teacherName} is already assigned to ${subject} in this class.` });
+            }
+            return res.status(409).json({
+                message: `${subject} is already assigned to ${holder} in this class. Another ${subject} teacher cannot be assigned.`
+            });
+        }
+
+        // Validate + reserve the period BEFORE creating the assignment, so a
+        // scheduling conflict leaves no orphaned assignment-without-a-period.
+        const classNoLabel = classLabel(classRecord);
+        const periodResult = await addPeriodToClassSchedule({
+            classNoLabel,
+            day,
+            startTime,
+            endTime,
+            subject,
+            teacherName: teacher.teacherName,
+            teacherEmail: teacher.teacherEmail
+        });
+        if (!periodResult.ok) {
+            return res.status(periodResult.status).json({ message: periodResult.message });
+        }
+
+        const assignment = await TeacherAssignment.create({
+            teacherId: teacher._id,
+            teacherEmail: teacher.teacherEmail,
+            classId,
+            subject,
+            subjectKey,
+            academicYear
+        });
+
+        if (!classRecord.teacherEmail) {
+            classRecord.teacherEmail = teacher.teacherEmail;
+            classRecord.teacherId = teacher.teacherName;
+            await classRecord.save();
+        }
+
+        res.status(201).json({ ...assignment.toObject(), period: periodResult.period });
+    } catch (err) {
+        const duplicate = err.code === 11000;
+        res.status(duplicate ? 409 : 500).json({
+            message: duplicate
+                ? 'This subject is already assigned to a teacher in this class.'
+                : 'Error creating teacher assignment.'
+        });
+    }
+});
+
+app.delete("/api/teacher-assignments/:id", async (req, res) => {
+    try {
+        const deleted = await TeacherAssignment.findByIdAndDelete(req.params.id);
+        if (!deleted) return res.status(404).json({ message: 'Assignment not found.' });
+
+        // The create route backfills class.teacherEmail; undo that here so the class
+        // does not keep pointing at a teacher who no longer has an assignment in it.
+        const classRecord = await Class.findById(deleted.classId);
+        if (classRecord && classRecord.teacherEmail === deleted.teacherEmail) {
+            const remaining = await TeacherAssignment.find({ classId: deleted.classId }).lean();
+            const stillTeaching = remaining.some(a => a.teacherEmail === deleted.teacherEmail);
+            if (!stillTeaching) {
+                const fallback = remaining[0];
+                if (fallback) {
+                    const fallbackTeacher = await Teacher.findOne({ teacherEmail: fallback.teacherEmail }).lean();
+                    classRecord.teacherEmail = fallback.teacherEmail;
+                    classRecord.teacherId = fallbackTeacher?.teacherName || '';
+                } else {
+                    classRecord.teacherEmail = '';
+                    classRecord.teacherId = '';
+                }
+                await classRecord.save();
+            }
+        }
+
+        // Also drop any timetable periods this assignment put there, so the
+        // Timetable page doesn't keep showing a teacher no longer assigned.
+        if (classRecord) {
+            await removeSchedulePeriodsForAssignment({
+                classNoLabel: classLabel(classRecord),
+                subjectKey: deleted.subjectKey,
+                teacherEmail: deleted.teacherEmail
+            });
+        }
+
+        res.json({ message: 'Teacher assignment removed.' });
+    } catch (err) {
+        res.status(500).json({ message: 'Error removing teacher assignment.' });
     }
 });
 
@@ -562,8 +1060,11 @@ app.post("/student/login", async (req, res) => {
 
 
             if (role === "teacher") {
-                const tClass = await Class.findOne({ teacherEmail: email });
-                responseData.teacherClass = tClass ? `${tClass.className} - ${tClass.section}` : 'Not Assigned';
+                const teacherClasses = await getTeacherAssignedClasses(email);
+                responseData.teacherClass = teacherClasses[0] || 'Not Assigned';
+                responseData.teacherClasses = teacherClasses;
+                responseData.teacherSubject = user.subject || 'General';
+                responseData.teacherSubjects = (user.subjects && user.subjects.length > 0) ? user.subjects : [user.subject || 'General'];
             } else if (role === "parent") {
                 // Get all children for this parent
                 const children = await Student.find({ _id: { $in: user.studentIds } }).lean();
@@ -607,32 +1108,64 @@ app.put("/api/students/:id", async (req, res) => {
             parentName, parentPhone, parentEmail, parentPassword, parentAddress
         } = req.body;
 
-        // Password length validations
+        const cleanStudentName = String(studentName || '').trim();
+        const cleanStudentEmail = String(studentEmail || '').trim();
+        const cleanParentName = String(parentName || '').trim();
+        const cleanParentPhone = String(parentPhone || '').trim();
+        const cleanParentEmail = String(parentEmail || '').trim();
+        const cleanParentAddress = String(parentAddress || '').trim();
+        const cleanStudentAge = Number(studentAge);
+
+        if (!cleanStudentName || !cleanStudentEmail || !cleanParentName || !cleanParentPhone || !cleanParentEmail || !cleanParentAddress || !studentGender || Number.isNaN(cleanStudentAge)) {
+            return res.status(400).json({ message: "All student and parent fields are required." });
+        }
+
+        if (!cleanStudentEmail.endsWith('@gmail.com')) {
+            return res.status(400).json({ message: "Student email must end with @gmail.com." });
+        }
+
+        if (!cleanParentEmail.endsWith('@gmail.com')) {
+            return res.status(400).json({ message: "Parent email must end with @gmail.com." });
+        }
+
+        if (!/^\d{11}$/.test(cleanParentPhone)) {
+            return res.status(400).json({ message: "Parent phone number must be exactly 11 digits." });
+        }
+
         if (studentPassword && studentPassword.length < 8) {
-            return res.status(400).json({ message: "Student password must be at least 8 characters" });
+            return res.status(400).json({ message: "Student password must be at least 8 characters." });
         }
         if (parentPassword && parentPassword.length < 8) {
-            return res.status(400).json({ message: "Parent password must be at least 8 characters" });
+            return res.status(400).json({ message: "Parent password must be at least 8 characters." });
         }
 
         const existingStudent = await Student.findById(id);
         if (!existingStudent) return res.status(404).json({ message: "Student not found" });
 
-        // Update Student (Roll number is deliberately excluded)
         const studentUpdateData = {
-            studentName, studentEmail, studentAge, studentGender
+            studentName: cleanStudentName,
+            studentEmail: cleanStudentEmail,
+            studentAge: cleanStudentAge,
+            studentGender
         };
         if (studentPassword) studentUpdateData.studentPassword = studentPassword;
 
         await Student.findByIdAndUpdate(id, studentUpdateData);
 
-        // Update Parent
         const parentUpdateData = {
-            parentName, parentPhone, parentEmail, parentAddress
+            parentName: cleanParentName,
+            parentPhone: cleanParentPhone,
+            parentEmail: cleanParentEmail,
+            parentAddress: cleanParentAddress
         };
         if (parentPassword) parentUpdateData.parentPassword = parentPassword;
 
-        await Parent.findOneAndUpdate({ studentId: id }, parentUpdateData);
+        const matchingParent = await Parent.findOne({ studentIds: id });
+        if (!matchingParent) {
+            return res.status(404).json({ message: "Parent record not found for this student." });
+        }
+
+        await Parent.findByIdAndUpdate(matchingParent._id, parentUpdateData);
 
         res.json({ message: "Student and Parent updated successfully!" });
     } catch (err) {
@@ -661,11 +1194,24 @@ app.delete("/api/students/:id", async (req, res) => {
 
 app.post("/users", upload.fields([{ name: 'profilePicture', maxCount: 1 }]), async (req, res) => {
     try {
-        let { teacherName, phoneNumber, email, password, address } = req.body;
+        let { teacherName, phoneNumber, email, password, address, subject, subjects } = req.body;
 
         if (!password || password.length < 8) {
             return res.status(400).json({ message: "Teacher password must be at least 8 characters." });
         }
+
+        const cleanSubject = String(subject || '').trim() || 'General';
+        let parsedSubjects = [];
+        if (Array.isArray(subjects)) {
+            parsedSubjects = subjects;
+        } else if (typeof subjects === 'string' && subjects.trim()) {
+            try {
+                parsedSubjects = JSON.parse(subjects);
+            } catch {
+                parsedSubjects = subjects.split(',').map(s => s.trim()).filter(Boolean);
+            }
+        }
+        if (parsedSubjects.length === 0) parsedSubjects = [cleanSubject];
 
         const profilePicture = getRelativePath(req.files, 'profilePicture');
 
@@ -675,20 +1221,21 @@ app.post("/users", upload.fields([{ name: 'profilePicture', maxCount: 1 }]), asy
             teacherEmail: email,
             teacherAddress: address,
             teacherPassword: password,
-            teacherProfile: profilePicture
+            teacherProfile: profilePicture,
+            subject: cleanSubject,
+            subjects: parsedSubjects
         });
-
 
         await teacher.save();
         res.status(201).json({
-            message: "Teacher data saved successfully!"
+            message: "Teacher data saved successfully!",
+            teacher
         });
     } catch (err) {
         console.error("Teacher Save Error:", err);
         res.status(500).json({ message: err.message || "Error saving teacher record" });
     }
 });
-
 
 app.get("/api/teachers", async (req, res) => {
     try {
@@ -703,6 +1250,8 @@ app.get("/api/teachers", async (req, res) => {
                 class: assignedClass ? `${assignedClass.className} - ${assignedClass.section}` : 'Not Assigned',
                 phoneNumber: t.teacherContact,
                 email: t.teacherEmail,
+                subject: t.subject || 'General',
+                subjects: t.subjects && t.subjects.length > 0 ? t.subjects : [t.subject || 'General'],
                 profilePicture: t.teacherProfile ? `/uploads/${t.teacherProfile}` : ''
             };
         });
@@ -712,12 +1261,99 @@ app.get("/api/teachers", async (req, res) => {
     }
 });
 
+app.post("/api/teachers/reset-all", async (req, res) => {
+    try {
+        await Teacher.deleteMany({});
+        await TeacherAssignment.deleteMany({});
+        await Class.updateMany({}, { $set: { teacherId: '', teacherEmail: '' } });
+        // Clear teacher and teacherEmail in all timetable periods
+        const schedules = await Schedule.find({});
+        for (const sch of schedules) {
+            if (sch.days) {
+                sch.days.forEach(d => {
+                    if (d.periods) {
+                        d.periods.forEach(p => {
+                            p.teacher = '';
+                            p.teacherEmail = '';
+                        });
+                    }
+                });
+                await sch.save();
+            }
+        }
+        res.json({ message: "All previous teachers, assignments, and schedule bookings have been successfully reset." });
+    } catch (err) {
+        console.error("Teacher Reset Error:", err);
+        res.status(500).json({ message: "Error resetting teachers" });
+    }
+});
 
+app.get("/api/teacher/assignments/:email", async (req, res) => {
+    try {
+        const { teacher, list } = await collectTeacherAssignmentPairs(req.params.email);
+        if (!teacher) return res.status(404).json({ message: "Teacher not found" });
+
+        res.json({
+            teacherName: teacher.teacherName,
+            teacherEmail: teacher.teacherEmail,
+            primarySubject: teacher.subject || 'General',
+            subjects: teacherQualifiedSubjects(teacher),
+            assignments: list,
+            classes: [...new Set(list.map(a => a.classNo))]
+        });
+    } catch (err) {
+        console.error("Error fetching teacher assignments:", err);
+        res.status(500).json({ message: "Error fetching teacher assignments" });
+    }
+});
+
+// A teacher's own weekly timetable, aggregated across every class they teach -
+// not one class's full schedule, but just this teacher's periods, wherever
+// they fall. Read-only: teachers view this, they don't edit it here.
+app.get("/api/teacher/timetable/:email", async (req, res) => {
+    try {
+        const cleanEmail = String(req.params.email || '').toLowerCase().trim();
+        const teacher = await Teacher.findOne({ teacherEmail: cleanEmail }).lean();
+        if (!teacher) return res.status(404).json({ message: "Teacher not found" });
+
+        const schedules = await Schedule.find({}).lean();
+        const days = SCHEDULE_DAYS.map(day => ({ day, periods: [] }));
+        const dayIndex = SCHEDULE_DAYS.reduce((map, d, i) => { map[d] = i; return map; }, {});
+
+        schedules.forEach(sch => {
+            (sch.days || []).forEach(d => {
+                if (!(d.day in dayIndex)) return;
+                (d.periods || []).forEach(p => {
+                    if ((p.teacherEmail || '').toLowerCase() === cleanEmail) {
+                        days[dayIndex[d.day]].periods.push({
+                            time: p.time,
+                            startTime: p.startTime,
+                            endTime: p.endTime,
+                            subject: p.subject,
+                            classNo: sch.classNo
+                        });
+                    }
+                });
+            });
+        });
+
+        days.forEach(d => d.periods.sort((a, b) => (a.startTime || '').localeCompare(b.startTime || '')));
+
+        res.json({
+            teacherName: teacher.teacherName,
+            teacherEmail: teacher.teacherEmail,
+            days
+        });
+    } catch (err) {
+        console.error("Error fetching teacher timetable:", err);
+        res.status(500).json({ message: "Error fetching teacher timetable" });
+    }
+});
 
 app.put("/api/teacher/update/:id", upload.fields([{ name: 'profilePicture', maxCount: 1 }]), async (req, res) => {
     try {
         const { id } = req.params;
-        const { teacherName, phoneNumber, email, address, password } = req.body;
+        let { teacherName, phoneNumber, email, address, password, subject, subjects } = req.body;
 
         if (password && password.length < 8) {
             return res.status(400).json({ message: "Password must be at least 8 characters" });
@@ -728,11 +1364,28 @@ app.put("/api/teacher/update/:id", upload.fields([{ name: 'profilePicture', maxC
             return res.status(404).json({ message: "Teacher not found" });
         }
 
+        const cleanSubject = (subject !== undefined ? String(subject).trim() : existingTeacher.subject) || 'General';
+        let parsedSubjects = existingTeacher.subjects || [cleanSubject];
+        if (subjects !== undefined) {
+            if (Array.isArray(subjects)) {
+                parsedSubjects = subjects;
+            } else if (typeof subjects === 'string' && subjects.trim()) {
+                try {
+                    parsedSubjects = JSON.parse(subjects);
+                } catch {
+                    parsedSubjects = subjects.split(',').map(s => s.trim()).filter(Boolean);
+                }
+            }
+        }
+        if (!parsedSubjects.includes(cleanSubject)) parsedSubjects.unshift(cleanSubject);
+
         const updatedData = {
             teacherName,
             teacherContact: phoneNumber,
             teacherEmail: email,
             teacherAddress: address,
+            subject: cleanSubject,
+            subjects: parsedSubjects
         };
 
         if (password) {
@@ -775,12 +1428,51 @@ app.put("/api/teacher/update/:id", upload.fields([{ name: 'profilePicture', maxC
 app.delete("/api/teacher/delete/:id", async (req, res) => {
     try {
         const { id } = req.params;
-        const result = await Teacher.findByIdAndDelete(id);
-        if (!result) {
+        const teacher = await Teacher.findById(id);
+        if (!teacher) {
             return res.status(404).json({ message: "Teacher not found" });
         }
-        res.json({ message: "Teacher deleted successfully" });
+        const teacherEmail = teacher.teacherEmail;
+
+        // A deleted teacher can't leave behind assignments or timetable
+        // periods that still point at them - clean those up as part of the
+        // same operation rather than leaving dangling references.
+        const assignments = await TeacherAssignment.find({ teacherEmail }).lean();
+        const affectedClassIds = [...new Set(assignments.map(a => String(a.classId)))];
+        await TeacherAssignment.deleteMany({ teacherEmail });
+
+        const schedules = await Schedule.find({});
+        for (const sch of schedules) {
+            let removed = 0;
+            sch.days.forEach(d => {
+                const before = d.periods.length;
+                d.periods = d.periods.filter(p => (p.teacherEmail || '').toLowerCase() !== teacherEmail.toLowerCase());
+                removed += before - d.periods.length;
+            });
+            if (removed > 0) await sch.save();
+        }
+
+        for (const classId of affectedClassIds) {
+            const classRecord = await Class.findById(classId);
+            if (classRecord && classRecord.teacherEmail === teacherEmail) {
+                const remaining = await TeacherAssignment.find({ classId }).lean();
+                const fallback = remaining[0];
+                if (fallback) {
+                    const fallbackTeacher = await Teacher.findOne({ teacherEmail: fallback.teacherEmail }).lean();
+                    classRecord.teacherEmail = fallback.teacherEmail;
+                    classRecord.teacherId = fallbackTeacher?.teacherName || '';
+                } else {
+                    classRecord.teacherEmail = '';
+                    classRecord.teacherId = '';
+                }
+                await classRecord.save();
+            }
+        }
+
+        await Teacher.findByIdAndDelete(id);
+        res.json({ message: "Teacher and their class assignments removed successfully" });
     } catch (err) {
+        console.error("Error deleting teacher:", err);
         res.status(500).json({ message: "Error deleting teacher" });
     }
 });
@@ -896,22 +1588,33 @@ app.delete("/api/announcements/:id", async (req, res) => {
 
 app.get("/api/parents", async (req, res) => {
     try {
-        const parents = await Parent.find({}).lean();
         const students = await Student.find({}).lean();
-        const parentsExtended = parents.map(p => {
-            const student = students.find(s => s._id.toString() === p.studentId?.toString());
-            return {
-                ...p,
-                studentName: student ? student.studentName : 'Unknown',
-                studentRollNo: student ? student.studentRollNo : '',
-                studentAge: student ? student.studentAge : '',
-                studentGender: student ? student.studentGender : '',
-                studentImage: sanitizePath(student ? student.studentImage : ''),
-                parentImage: sanitizePath(p.parentImage),
-                classNo: p.classNo || (student ? student.classNo : '')
-            };
+        const parents = await Parent.find({}).lean();
+
+        // Driven from students, not parents: the Parent schema links to its
+        // children via `studentIds` (an array - a parent can have more than
+        // one), so this returns one row per (parent, student) pair. A parent
+        // with no matching student, or a student with no linked parent, is
+        // skipped rather than produced with placeholder data.
+        const rows = [];
+        students.forEach(s => {
+            const parent = parents.find(p =>
+                p.studentIds && p.studentIds.some(id => id.toString() === s._id.toString())
+            );
+            if (!parent) return;
+            rows.push({
+                ...parent,
+                studentId: s._id,
+                studentName: s.studentName,
+                studentRollNo: s.studentRollNo,
+                studentAge: s.studentAge,
+                studentGender: s.studentGender,
+                studentImage: sanitizePath(s.studentImage),
+                parentImage: sanitizePath(parent.parentImage),
+                classNo: s.classNo
+            });
         });
-        res.json(parentsExtended);
+        res.json(rows);
     } catch (err) {
         res.status(500).json({ message: "Error fetching parents" });
     }
@@ -1055,20 +1758,6 @@ app.get("/api/fees", async (req, res) => {
     }
 });
 
-app.put("/api/fees/:id/pay", async (req, res) => {
-    try {
-        const { id } = req.params;
-        const updatedFee = await Fee.findByIdAndUpdate(
-            id,
-            { status: 'Paid' },
-            { new: true }
-        );
-        res.json(updatedFee);
-    } catch (err) {
-        res.status(500).json({ message: "Error paying fee" });
-    }
-});
-
 app.put("/api/fees/:id/upload-receipt", upload.single('parentReceipt'), async (req, res) => {
     try {
         const { id } = req.params;
@@ -1076,6 +1765,11 @@ app.put("/api/fees/:id/upload-receipt", upload.single('parentReceipt'), async (r
 
         if (!parentReceipt) {
             return res.status(400).json({ message: "Receipt file is required." });
+        }
+
+        const livePayment = await Payment.findOne({ voucherId: id, status: { $in: ['Pending', 'Approved'] } });
+        if (livePayment) {
+            return res.status(409).json({ message: `An online payment (${livePayment.transactionId}) is already ${livePayment.status.toLowerCase()} for this voucher.` });
         }
 
         const updatedFee = await Fee.findByIdAndUpdate(
@@ -1106,12 +1800,345 @@ app.put("/api/fees/:id/approve", async (req, res) => {
         const { id } = req.params;
         const updatedFee = await Fee.findByIdAndUpdate(
             id,
-            { status: 'Paid' },
+            { status: 'Paid', paidAt: new Date() },
             { new: true }
         );
         res.json(updatedFee);
     } catch (err) {
         res.status(500).json({ message: "Error approving fee" });
+    }
+});
+
+// ---------------------------------------------------------------------------
+// Mock online payments (simulation only - no real gateway, no real money).
+// Flow: parent submits -> Pending -> admin approves (voucher -> Paid) or
+// rejects (voucher stays unpaid). Parents can never mark a voucher Paid.
+// ---------------------------------------------------------------------------
+
+const PAYMENT_METHODS = ['Mock Card', 'Mock JazzCash', 'Mock Easypaisa'];
+
+// The app has no session/token auth: every route receives role + email from
+// the client. These at least confirm the email belongs to a real account of
+// that role before any payment action is allowed.
+async function getAdminFromRequest(req) {
+    const src = { ...req.query, ...req.body };
+    if ((src.role || '').toLowerCase() !== 'admin' || !src.email) return null;
+    return Admin.findOne({ adminEmail: src.email });
+}
+
+async function getParentFromRequest(req) {
+    const src = { ...req.query, ...req.body };
+    if ((src.role || '').toLowerCase() !== 'parent' || !src.email) return null;
+    return Parent.findOne({ parentEmail: src.email });
+}
+
+function voucherNumberFor(fee) {
+    return `VCH-${fee._id.toString().slice(-8).toUpperCase()}`;
+}
+
+function generateTransactionId() {
+    const d = new Date();
+    const date = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+    return `TXN-${date}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+}
+
+// Flatten a populated payment into what the UI needs.
+function serializePayment(p) {
+    const fee = p.voucherId && p.voucherId._id ? p.voucherId : null;
+    return {
+        _id: p._id,
+        transactionId: p.transactionId,
+        amount: p.amount,
+        paymentMethod: p.paymentMethod,
+        accountLast4: p.accountLast4,
+        status: p.status,
+        rejectionReason: p.rejectionReason,
+        createdAt: p.createdAt,
+        approvedAt: p.approvedAt,
+        rejectedAt: p.rejectedAt,
+        approvedBy: p.approvedBy && p.approvedBy.adminName ? p.approvedBy.adminName : null,
+        rejectedBy: p.rejectedBy && p.rejectedBy.adminName ? p.rejectedBy.adminName : null,
+        voucher: fee ? {
+            _id: fee._id,
+            voucherNumber: voucherNumberFor(fee),
+            month: fee.month,
+            year: fee.year,
+            dueDate: fee.dueDate,
+            amount: fee.amount,
+            classNo: fee.classNo,
+            status: fee.status
+        } : null,
+        studentName: p.studentId && p.studentId.studentName ? p.studentId.studentName : (fee ? fee.studentName : ''),
+        parentName: p.parentId && p.parentId.parentName ? p.parentId.parentName : '',
+        parentEmail: p.parentId && p.parentId.parentEmail ? p.parentId.parentEmail : ''
+    };
+}
+
+function populatePayment(query) {
+    return query
+        .populate('voucherId')
+        .populate('studentId', 'studentName')
+        .populate('parentId', 'parentName parentEmail')
+        .populate('approvedBy', 'adminName')
+        .populate('rejectedBy', 'adminName');
+}
+
+// Submit a mock payment (parent)
+app.post("/api/payments", async (req, res) => {
+    try {
+        const parent = await getParentFromRequest(req);
+        if (!parent) return res.status(403).json({ message: "Only a logged-in parent can submit payments." });
+
+        const { voucherId, amount, paymentMethod, accountNumber } = req.body;
+        if (!voucherId || !mongoose.isValidObjectId(voucherId)) {
+            return res.status(400).json({ message: "A valid fee voucher is required." });
+        }
+        if (!PAYMENT_METHODS.includes(paymentMethod)) {
+            return res.status(400).json({ message: "Invalid payment method." });
+        }
+
+        // Dummy details only. Card = 16 digits, wallet = 11-digit mobile number.
+        // Only the last 4 digits are stored; CVV / PIN are never sent here.
+        const digits = String(accountNumber || '').replace(/\D/g, '');
+        if (paymentMethod === 'Mock Card' && digits.length !== 16) {
+            return res.status(400).json({ message: "Enter a 16-digit dummy card number." });
+        }
+        if (paymentMethod !== 'Mock Card' && !/^03\d{9}$/.test(digits)) {
+            return res.status(400).json({ message: "Enter an 11-digit dummy mobile wallet number (03XXXXXXXXX)." });
+        }
+
+        const fee = await Fee.findById(voucherId);
+        if (!fee) return res.status(404).json({ message: "Fee voucher not found." });
+        if (fee.parentEmail !== parent.parentEmail) {
+            return res.status(403).json({ message: "You can only pay vouchers issued to you." });
+        }
+        if (fee.status === 'Paid') {
+            return res.status(409).json({ message: "This voucher is already paid." });
+        }
+        if (fee.status === 'Review') {
+            return res.status(409).json({ message: "A bank receipt for this voucher is already under review." });
+        }
+        if (Number(amount) !== fee.amount) {
+            return res.status(400).json({ message: `Payment amount must equal the voucher amount (Rs ${fee.amount}).` });
+        }
+
+        const live = await Payment.findOne({ activeVoucher: fee._id });
+        if (live) {
+            return res.status(409).json({ message: `A payment (${live.transactionId}) is already ${live.status.toLowerCase()} for this voucher.` });
+        }
+
+        const children = await Student.find({ _id: { $in: parent.studentIds } }, 'studentName').lean();
+        const student = children.find(c => c.studentName === fee.studentName);
+
+        const payment = new Payment({
+            transactionId: generateTransactionId(),
+            voucherId: fee._id,
+            studentId: student ? student._id : undefined,
+            parentId: parent._id,
+            amount: fee.amount,
+            paymentMethod,
+            accountLast4: digits.slice(-4),
+            status: 'Pending',
+            activeVoucher: fee._id
+        });
+        await payment.save();
+
+        adminAlertQueue.push({
+            _id: Date.now().toString(),
+            title: "Action Required: Online Payment Submitted",
+            content: `${fee.studentName}'s parent submitted payment ${payment.transactionId} for ${fee.month}. Please review it under Fee Records → Online Payments.`,
+            isAlert: true,
+            createdAt: new Date()
+        });
+
+        const saved = await populatePayment(Payment.findById(payment._id));
+        res.status(201).json({
+            message: "Payment submitted successfully. Your payment is waiting for admin approval.",
+            payment: serializePayment(saved)
+        });
+    } catch (err) {
+        if (err && err.code === 11000) {
+            return res.status(409).json({ message: "A payment is already in progress for this voucher." });
+        }
+        console.error("Submit payment error:", err);
+        res.status(500).json({ message: "Error submitting payment" });
+    }
+});
+
+// Parent's own payment history
+app.get("/api/payments/my", async (req, res) => {
+    try {
+        const parent = await getParentFromRequest(req);
+        if (!parent) return res.status(403).json({ message: "Unauthorized" });
+        const payments = await populatePayment(Payment.find({ parentId: parent._id }).sort({ createdAt: -1 }));
+        res.json(payments.map(serializePayment));
+    } catch (err) {
+        console.error("Fetch parent payments error:", err);
+        res.status(500).json({ message: "Error fetching payments" });
+    }
+});
+
+// All payment requests (admin) with optional status filter and search by
+// student name or transaction ID
+app.get("/api/payments", async (req, res) => {
+    try {
+        const admin = await getAdminFromRequest(req);
+        if (!admin) return res.status(403).json({ message: "Only an admin can view payment requests." });
+
+        const { status, search } = req.query;
+        const filter = {};
+        if (status && ['Pending', 'Approved', 'Rejected'].includes(status)) filter.status = status;
+
+        let payments = (await populatePayment(Payment.find(filter).sort({ createdAt: -1 }))).map(serializePayment);
+        if (search && search.trim()) {
+            const term = search.trim().toLowerCase();
+            payments = payments.filter(p =>
+                p.transactionId.toLowerCase().includes(term) ||
+                (p.studentName || '').toLowerCase().includes(term)
+            );
+        }
+        res.json(payments);
+    } catch (err) {
+        console.error("Fetch payments error:", err);
+        res.status(500).json({ message: "Error fetching payments" });
+    }
+});
+
+// Loads a payment the requester may see: any payment for an admin, only
+// their own for a parent. Sends the error response itself and returns null.
+async function loadAuthorizedPayment(req, res) {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+        res.status(400).json({ message: "Invalid payment id." });
+        return null;
+    }
+    const admin = await getAdminFromRequest(req);
+    const parent = admin ? null : await getParentFromRequest(req);
+    if (!admin && !parent) {
+        res.status(403).json({ message: "Unauthorized" });
+        return null;
+    }
+    const payment = await populatePayment(Payment.findById(req.params.id));
+    if (!payment) {
+        res.status(404).json({ message: "Payment not found." });
+        return null;
+    }
+    if (parent && payment.parentId._id.toString() !== parent._id.toString()) {
+        res.status(403).json({ message: "You can only view your own payments." });
+        return null;
+    }
+    return payment;
+}
+
+// Payment details (admin, or the owning parent)
+app.get("/api/payments/:id", async (req, res) => {
+    try {
+        const payment = await loadAuthorizedPayment(req, res);
+        if (payment) res.json(serializePayment(payment));
+    } catch (err) {
+        console.error("Fetch payment error:", err);
+        res.status(500).json({ message: "Error fetching payment" });
+    }
+});
+
+// Receipt - only for Approved payments
+app.get("/api/payments/:id/receipt", async (req, res) => {
+    try {
+        const payment = await loadAuthorizedPayment(req, res);
+        if (!payment) return;
+        if (payment.status !== 'Approved') {
+            return res.status(403).json({ message: "A receipt is available only after admin approval." });
+        }
+        const p = serializePayment(payment);
+        res.json({
+            school: "EduGuardian",
+            studentName: p.studentName,
+            parentName: p.parentName,
+            voucherNumber: p.voucher ? p.voucher.voucherNumber : '',
+            feeMonth: p.voucher ? `${p.voucher.month} ${p.voucher.year}` : '',
+            amount: p.amount,
+            paymentMethod: p.paymentMethod,
+            transactionId: p.transactionId,
+            paymentDate: p.createdAt,
+            approvalDate: p.approvedAt,
+            approvedBy: p.approvedBy,
+            status: "PAID"
+        });
+    } catch (err) {
+        console.error("Fetch receipt error:", err);
+        res.status(500).json({ message: "Error fetching receipt" });
+    }
+});
+
+// Approve (admin) - payment Pending -> Approved, voucher -> Paid
+app.put("/api/payments/:id/approve", async (req, res) => {
+    try {
+        const admin = await getAdminFromRequest(req);
+        if (!admin) return res.status(403).json({ message: "Only an admin can approve payments." });
+        if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ message: "Invalid payment id." });
+
+        const payment = await Payment.findById(req.params.id);
+        if (!payment) return res.status(404).json({ message: "Payment not found." });
+        if (payment.status !== 'Pending') {
+            return res.status(409).json({ message: `Only pending payments can be approved (this one is ${payment.status}).` });
+        }
+        const fee = await Fee.findById(payment.voucherId);
+        if (!fee) return res.status(404).json({ message: "The related fee voucher no longer exists." });
+        if (fee.status === 'Paid') {
+            return res.status(409).json({ message: "The related voucher is already paid. Reject this payment instead." });
+        }
+
+        const now = new Date();
+        // Conditional update so two admins clicking at once can't both approve.
+        const approved = await Payment.findOneAndUpdate(
+            { _id: payment._id, status: 'Pending' },
+            { status: 'Approved', approvedBy: admin._id, approvedAt: now },
+            { new: true }
+        );
+        if (!approved) return res.status(409).json({ message: "This payment was already processed." });
+
+        await Fee.findByIdAndUpdate(fee._id, { status: 'Paid', paidAt: now });
+
+        const result = await populatePayment(Payment.findById(payment._id));
+        res.json({ message: "Payment approved. Voucher marked as Paid.", payment: serializePayment(result) });
+    } catch (err) {
+        console.error("Approve payment error:", err);
+        res.status(500).json({ message: "Error approving payment" });
+    }
+});
+
+// Reject (admin) - payment Pending -> Rejected, voucher stays unpaid
+app.put("/api/payments/:id/reject", async (req, res) => {
+    try {
+        const admin = await getAdminFromRequest(req);
+        if (!admin) return res.status(403).json({ message: "Only an admin can reject payments." });
+        if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ message: "Invalid payment id." });
+
+        const rejected = await Payment.findOneAndUpdate(
+            { _id: req.params.id, status: 'Pending' },
+            {
+                $set: {
+                    status: 'Rejected',
+                    rejectedBy: admin._id,
+                    rejectedAt: new Date(),
+                    rejectionReason: String(req.body.reason || '').trim().slice(0, 500)
+                },
+                // Frees the voucher so the parent can submit a new payment.
+                $unset: { activeVoucher: 1 }
+            },
+            { new: true }
+        );
+        if (!rejected) {
+            const exists = await Payment.exists({ _id: req.params.id });
+            return exists
+                ? res.status(409).json({ message: "Only pending payments can be rejected." })
+                : res.status(404).json({ message: "Payment not found." });
+        }
+
+        const result = await populatePayment(Payment.findById(rejected._id));
+        res.json({ message: "Payment rejected. Voucher remains unpaid.", payment: serializePayment(result) });
+    } catch (err) {
+        console.error("Reject payment error:", err);
+        res.status(500).json({ message: "Error rejecting payment" });
     }
 });
 
@@ -1138,25 +2165,56 @@ app.get("/api/students/class/:classNo", async (req, res) => {
 
 app.post("/api/attendance", async (req, res) => {
     try {
-        const { attendanceRecords, date, classNo, markedBy } = req.body;
+        const { attendanceRecords, date, classNo, subject, markedBy } = req.body;
 
         if (!attendanceRecords || !attendanceRecords.length) {
             return res.status(400).json({ message: "No attendance records provided" });
         }
+        if (!subject || !String(subject).trim()) {
+            return res.status(400).json({ message: "Subject is required for attendance." });
+        }
+
+        const trimmedSubject = String(subject).trim();
+        const searchDate = new Date(date);
+        searchDate.setHours(0, 0, 0, 0);
+
+        if (markedBy) {
+            const teacher = await Teacher.findOne({ teacherEmail: String(markedBy).toLowerCase().trim() }).lean();
+            if (teacher) {
+                const auth = await teacherAuthorizedForClassSubject(teacher.teacherEmail, classNo, trimmedSubject);
+                if (!auth.ok) {
+                    return res.status(403).json({ message: auth.message });
+                }
+            }
+        }
+
+        // Snapshot prior status so re-saving an already-marked day doesn't re-email
+        // parents whose child was already Absent - only newly-Absent students should.
+        const existingRecords = await Attendance.find({
+            studentId: { $in: attendanceRecords.map(r => r.studentId) },
+            date: searchDate,
+            subject: trimmedSubject
+        }).lean();
+        const previousStatusByStudent = existingRecords.reduce((map, r) => {
+            map[r.studentId] = r.status;
+            return map;
+        }, {});
 
         const bulkOps = attendanceRecords.map(record => ({
             updateOne: {
                 filter: {
                     studentId: record.studentId,
-                    date: new Date(date).setHours(0, 0, 0, 0)
+                    date: searchDate,
+                    subject: trimmedSubject
                 },
                 update: {
                     $set: {
                         studentName: record.studentName,
                         classNo: classNo,
                         status: record.status,
+                        subject: trimmedSubject,
                         markedBy: markedBy,
-                        date: new Date(date).setHours(0, 0, 0, 0)
+                        date: searchDate
                     }
                 },
                 upsert: true
@@ -1164,7 +2222,21 @@ app.post("/api/attendance", async (req, res) => {
         }));
 
         await Attendance.bulkWrite(bulkOps);
-        res.json({ message: "Attendance marked successfully" });
+        res.json({ message: `Attendance for ${trimmedSubject} marked successfully!` });
+
+        // Fire-and-forget: email parents of newly-Absent students. Not awaited so
+        // the response above doesn't wait on SMTP round trips.
+        const newlyAbsent = attendanceRecords.filter(r =>
+            r.status === 'Absent' && previousStatusByStudent[r.studentId] !== 'Absent'
+        );
+        Promise.allSettled(newlyAbsent.map(r => notifications.notifyAbsence({
+            studentId: r.studentId,
+            studentName: r.studentName,
+            classNo,
+            date: searchDate,
+            subject: trimmedSubject
+        }))).catch(err => console.error('Absence notification error:', err));
+        return;
     } catch (err) {
         console.error("Attendance save error:", err);
         res.status(500).json({ message: "Error marking attendance" });
@@ -1175,13 +2247,19 @@ app.post("/api/attendance", async (req, res) => {
 app.get("/api/attendance/class/:classNo", async (req, res) => {
     try {
         const { classNo } = req.params;
-        const { date } = req.query;
-        const searchDate = new Date(date).setHours(0, 0, 0, 0);
+        const { date, subject } = req.query;
+        const searchDate = new Date(date);
+        searchDate.setHours(0, 0, 0, 0);
 
-        const records = await Attendance.find({
+        const query = {
             classNo: classNo,
             date: searchDate
-        });
+        };
+        if (subject && String(subject).trim()) {
+            query.subject = String(subject).trim();
+        }
+
+        const records = await Attendance.find(query);
         res.json(records);
     } catch (err) {
         res.status(500).json({ message: "Error fetching attendance records" });
@@ -1191,55 +2269,188 @@ app.get("/api/attendance/class/:classNo", async (req, res) => {
 app.get("/api/attendance/student/:studentId", async (req, res) => {
     try {
         const { studentId } = req.params;
-        const records = await Attendance.find({ studentId: studentId }).sort({ date: -1 });
+        const records = await Attendance.find({ studentId: studentId }).sort({ date: -1, subject: 1 });
         res.json(records);
     } catch (err) {
         res.status(500).json({ message: "Error fetching student attendance history" });
     }
 });
 
+// Helper for grade calculation
+function calculateGrade(percentage) {
+    if (percentage >= 80) return 'A+';
+    if (percentage >= 70) return 'A';
+    if (percentage >= 60) return 'B';
+    if (percentage >= 50) return 'C';
+    if (percentage >= 40) return 'D';
+    return 'F';
+}
+
 // --- RESULTS ENDPOINTS ---
 app.post("/api/results", async (req, res) => {
     try {
-        const { results, examType, classNo, expiryDate, markedBy } = req.body;
+        const { results, examType, classNo, expiryDate, markedBy, subject: targetSubject } = req.body;
+        const normalizedExpiryDate = new Date(expiryDate);
+        normalizedExpiryDate.setHours(23, 59, 59, 999);
 
-        const bulkOps = results.map(rec => ({
-            updateOne: {
-                filter: { studentId: rec.studentId, examType: examType },
-                update: {
+        if (!Array.isArray(results) || results.length === 0 || Number.isNaN(normalizedExpiryDate.getTime())) {
+            return res.status(400).json({ message: "Valid results and expiry date are required." });
+        }
+
+        // Check if markedBy is teacher to enforce subject-wise isolation
+        let teacherSubject = null;
+        let teacherName = null;
+        if (markedBy) {
+            const teacher = await Teacher.findOne({ teacherEmail: String(markedBy).toLowerCase().trim() }).lean();
+            if (teacher) {
+                const subjectToGrade = targetSubject || teacher.subject;
+                const auth = await teacherAuthorizedForClassSubject(teacher.teacherEmail, classNo, subjectToGrade);
+                if (!auth.ok) {
+                    return res.status(403).json({ message: auth.message });
+                }
+                teacherSubject = subjectToGrade;
+                teacherName = teacher.teacherName;
+            }
+        }
+        const cleanTeacherSub = teacherSubject ? teacherSubject.toLowerCase() : null;
+
+        const publishedResults = [];
+        for (const rec of results) {
+            const existing = await Result.findOne({ studentId: rec.studentId, examType: examType });
+
+            // A teacher save only ever intends to touch their own subject for
+            // this student - if it isn't actually present in what was
+            // submitted, there's nothing for this student to do here. This is
+            // what stops "enter one student's mark, save" from silently
+            // zeroing/failing every other student in the class who simply
+            // hadn't been graded yet.
+            const incomingTeacherSub = cleanTeacherSub
+                ? (rec.subjects || []).find(sub => sub.name && sub.name.toLowerCase() === cleanTeacherSub)
+                : null;
+            if (cleanTeacherSub && !incomingTeacherSub) {
+                continue;
+            }
+            const previousTeacherScore = cleanTeacherSub
+                ? existing?.subjects?.find(s => s.name && s.name.toLowerCase() === cleanTeacherSub)?.score
+                : undefined;
+
+            let mergedSubjects = rec.subjects || [];
+
+            if (existing && existing.subjects && existing.subjects.length > 0 && teacherSubject) {
+                // Keep other subjects untouched, update only teacher's subject
+                let matched = false;
+                mergedSubjects = existing.subjects.map(s => {
+                    if (s.name && s.name.toLowerCase() === cleanTeacherSub && incomingTeacherSub) {
+                        matched = true;
+                        return incomingTeacherSub;
+                    }
+                    return s;
+                });
+
+                // If teacher's subject was not in existing, append it
+                if (incomingTeacherSub && !matched) {
+                    mergedSubjects.push(incomingTeacherSub);
+                }
+            } else if (!existing && teacherSubject) {
+                // First teacher entering marks for this exam: save their subject
+                if (incomingTeacherSub) {
+                    mergedSubjects = [incomingTeacherSub];
+                }
+            }
+
+            const grandTotal = mergedSubjects.reduce((sum, s) => sum + (Number(s.score) || 0), 0);
+            const maxTotal = mergedSubjects.reduce((sum, s) => sum + (Number(s.totalMarks) || 100), 0);
+            const percentage = maxTotal > 0 ? (grandTotal / maxTotal) * 100 : 0;
+            const grade = calculateGrade(percentage);
+
+            await Result.updateOne(
+                { studentId: rec.studentId, examType: examType },
+                {
                     $set: {
                         studentName: rec.studentName,
                         classNo: classNo,
-                        subjects: rec.subjects,
-                        grandTotal: rec.grandTotal,
-                        maxTotal: rec.maxTotal,
-                        grade: rec.grade,
-                        expiryDate: new Date(expiryDate),
+                        subjects: mergedSubjects,
+                        grandTotal,
+                        maxTotal,
+                        grade,
+                        expiryDate: normalizedExpiryDate,
                         markedBy: markedBy
                     }
                 },
-                upsert: true
-            }
-        }));
+                { upsert: true }
+            );
 
-        await Result.bulkWrite(bulkOps);
+            // Only notify when this student's mark for this subject is new or
+            // actually changed - re-saving a class where most students are
+            // unchanged (e.g. after fixing just one) must not re-email
+            // everyone else a second time.
+            const scoreChanged = cleanTeacherSub
+                ? (incomingTeacherSub?.score !== previousTeacherScore)
+                : (!existing || existing.grandTotal !== grandTotal);
+            if (!scoreChanged) continue;
+
+            publishedResults.push({
+                studentId: rec.studentId,
+                studentName: rec.studentName,
+                classNo,
+                examType,
+                grandTotal,
+                maxTotal,
+                grade,
+                subject: teacherSubject,
+                teacherName,
+                // The subject's own score, distinct from grandTotal (the sum
+                // across every subject the student has been graded in so
+                // far). A Computer Science teacher's email must show the
+                // Computer Science score, not Computer Science + Chemistry
+                // + whatever else has already been entered.
+                subjectScore: incomingTeacherSub?.score,
+                subjectTotalMarks: incomingTeacherSub?.totalMarks
+            });
+        }
+
         res.json({ message: "Results published successfully" });
+
+        // Fire-and-forget: email parents only for students whose result
+        // actually changed in this save. Not awaited so the response isn't
+        // held up by SMTP.
+        Promise.allSettled(publishedResults.map(r => notifications.notifyResultPublished(r)))
+            .catch(err => console.error('Result notification error:', err));
+        return;
     } catch (err) {
         console.error("Result save error:", err);
         res.status(500).json({ message: "Error publishing results" });
     }
 });
 
+// Admin-only manual trigger for the daily overdue-fee / late-homework email
+// scan, so it can be tested/demoed without waiting for the 07:00 schedule.
+app.post("/api/notifications/run-daily-checks", async (req, res) => {
+    try {
+        const { role } = req.body;
+        if (role !== "admin" && role !== "Admin") {
+            return res.status(403).json({ message: "Unauthorized" });
+        }
+        const result = await runDailyChecks();
+        res.json({ message: "Daily notification scan complete.", ...result });
+    } catch (err) {
+        console.error("Manual daily checks error:", err);
+        res.status(500).json({ message: "Error running daily notification scan." });
+    }
+});
+
 app.get("/api/results/student/:studentId", async (req, res) => {
     try {
-        const { studentId } = req.params;
-        const now = new Date();
+        const studentId = String(req.params.studentId || '').trim();
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
         const records = await Result.find({
             studentId,
-            expiryDate: { $gt: now }
+            expiryDate: { $gte: startOfToday }
         }).sort({ updatedAt: -1 });
         res.json(records);
     } catch (err) {
+        console.error("Error fetching student results:", err);
         res.status(500).json({ message: "Error fetching results" });
     }
 });
@@ -1247,11 +2458,12 @@ app.get("/api/results/student/:studentId", async (req, res) => {
 app.get("/api/results/class/:classNo", async (req, res) => {
     try {
         const classNo = req.params.classNo?.trim();
-        const now = new Date();
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
         const normalizedRegex = new RegExp('^' + classNo.replace(/\s+/g, '\\s*') + '$', 'i');
         const records = await Result.find({
             classNo: normalizedRegex,
-            expiryDate: { $gt: now }
+            expiryDate: { $gte: startOfToday }
         }).sort({ updatedAt: -1 });
         res.json(records);
     } catch (err) {
@@ -1417,14 +2629,163 @@ app.get("/api/student/dashboard-stats/:studentId", async (req, res) => {
 app.post("/api/schedule", async (req, res) => {
     try {
         const { classNo, days } = req.body;
-        await Schedule.findOneAndUpdate(
+
+        if (!classNo || !days || !Array.isArray(days)) {
+            return res.status(400).json({ message: "Class name and days schedule array are required." });
+        }
+
+        // Normalize time strings and interval boundaries for incoming periods
+        const normalizedDays = days.map(d => ({
+            day: d.day,
+            periods: (d.periods || []).map(p => {
+                let start = p.startTime || '';
+                let end = p.endTime || '';
+                let time = p.time || '';
+
+                if ((!start || !end) && time.includes('-')) {
+                    const [s, e] = time.split('-');
+                    start = s.trim();
+                    end = e.trim();
+                } else if (start && end && !time) {
+                    time = `${start} - ${end}`;
+                }
+
+                return {
+                    time,
+                    startTime: start,
+                    endTime: end,
+                    subject: (p.subject || '').trim(),
+                    teacher: (p.teacher || '').trim(),
+                    teacherEmail: (p.teacherEmail || '').toLowerCase().trim()
+                };
+            })
+        }));
+
+        // 1. Conflict Check: In-class overlaps on the same day
+        for (const d of normalizedDays) {
+            const periods = d.periods;
+            for (let i = 0; i < periods.length; i++) {
+                const p1 = periods[i];
+                const { startMin: s1, endMin: e1 } = parsePeriodInterval(p1);
+                if (s1 === null || e1 === null) continue;
+
+                for (let j = i + 1; j < periods.length; j++) {
+                    const p2 = periods[j];
+                    const { startMin: s2, endMin: e2 } = parsePeriodInterval(p2);
+                    if (s2 === null || e2 === null) continue;
+
+                    if (doIntervalsOverlap(s1, e1, s2, e2)) {
+                        return res.status(400).json({
+                            message: `Conflict: Class ${classNo} already has overlapping periods on ${d.day} (${p1.time} and ${p2.time}).`
+                        });
+                    }
+                }
+            }
+        }
+
+        // 2. Conflict Check: Across ALL OTHER classes for the same teacher on the same day/time
+        const otherSchedules = await Schedule.find({ classNo: { $ne: classNo } }).lean();
+
+        for (const d of normalizedDays) {
+            for (const p of d.periods) {
+                if (!p.teacherEmail && !p.teacher) continue;
+
+                const { startMin: pStart, endMin: pEnd } = parsePeriodInterval(p);
+                if (pStart === null || pEnd === null) continue;
+
+                for (const otherSch of otherSchedules) {
+                    const otherDay = (otherSch.days || []).find(od => od.day === d.day);
+                    if (!otherDay) continue;
+
+                    for (const op of (otherDay.periods || [])) {
+                        const sameEmail = p.teacherEmail && op.teacherEmail && p.teacherEmail.toLowerCase() === op.teacherEmail.toLowerCase();
+                        const sameName = p.teacher && op.teacher && p.teacher.toLowerCase() === op.teacher.toLowerCase();
+
+                        if (sameEmail || sameName) {
+                            const { startMin: opStart, endMin: opEnd } = parsePeriodInterval(op);
+                            if (opStart !== null && opEnd !== null && doIntervalsOverlap(pStart, pEnd, opStart, opEnd)) {
+                                return res.status(400).json({
+                                    message: `Scheduling Conflict: Teacher "${p.teacher || p.teacherEmail}" is already assigned to Class ${otherSch.classNo} on ${d.day} during ${op.time || (op.startTime + ' - ' + op.endTime)}. Cannot assign overlapping schedule.`
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Subject uniqueness and teacher qualification
+        const subjectTeachers = new Map();
+        for (const d of normalizedDays) {
+            for (const p of d.periods) {
+                if (!p.subject || (!p.teacherEmail && !p.teacher)) continue;
+                const key = normalizeSubject(p.subject);
+                const current = subjectTeachers.get(key);
+                const identity = (p.teacherEmail || p.teacher).toLowerCase();
+                if (current && current !== identity) {
+                    return res.status(409).json({
+                        message: `${p.subject} is already assigned to another teacher in Class ${classNo}. A second ${p.subject} teacher cannot be assigned.`
+                    });
+                }
+                subjectTeachers.set(key, identity);
+
+                if (p.teacherEmail) {
+                    const teacher = await Teacher.findOne({ teacherEmail: p.teacherEmail }).lean();
+                    if (teacher && !teacherCanTeach(teacher, p.subject)) {
+                        return res.status(403).json({
+                            message: `${teacher.teacherName} teaches ${teacher.subject} and cannot take ${p.subject} in the timetable.`
+                        });
+                    }
+                }
+            }
+        }
+
+        const targetClass = await findClassByLabel(classNo);
+        if (targetClass) {
+            for (const [subjectKey, identity] of subjectTeachers.entries()) {
+                const existing = await TeacherAssignment.findOne({ classId: targetClass._id, subjectKey }).lean();
+                if (existing && existing.teacherEmail && existing.teacherEmail.toLowerCase() !== identity) {
+                    return res.status(409).json({
+                        message: `${existing.subject} is already assigned to ${existing.teacherEmail} in this class. Remove that assignment before assigning a different teacher.`
+                    });
+                }
+            }
+        }
+
+        // Save schedule
+        const savedSchedule = await Schedule.findOneAndUpdate(
             { classNo },
-            { days },
+            { days: normalizedDays },
             { upsert: true, new: true }
         );
-        res.json({ message: "Schedule updated successfully" });
+
+        if (targetClass) {
+            for (const d of normalizedDays) {
+                for (const p of d.periods) {
+                    if (p.teacherEmail && p.subject) {
+                        const teacher = await Teacher.findOne({ teacherEmail: p.teacherEmail });
+                        if (teacher) {
+                            await TeacherAssignment.updateOne(
+                                { classId: targetClass._id, subjectKey: normalizeSubject(p.subject), academicYear: '2025-26' },
+                                {
+                                    $setOnInsert: {
+                                        teacherId: teacher._id,
+                                        teacherEmail: teacher.teacherEmail,
+                                        subject: p.subject
+                                    }
+                                },
+                                { upsert: true }
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        res.json({ message: "Timetable schedule saved successfully with zero conflicts!", schedule: savedSchedule });
     } catch (err) {
-        res.status(500).json({ message: "Error updating schedule" });
+        console.error("Schedule update error:", err);
+        res.status(500).json({ message: "Error updating schedule: " + err.message });
     }
 });
 
@@ -1450,6 +2811,15 @@ app.put("/api/fees/:id/reject", async (req, res) => {
     }
 });
 
+app.get("/api/schedules", async (req, res) => {
+    try {
+        const schedules = await Schedule.find({}).lean();
+        res.json(schedules);
+    } catch (err) {
+        res.status(500).json({ message: "Error fetching schedules" });
+    }
+});
+
 app.get("/api/schedule/:classNo", async (req, res) => {
     try {
         const schedule = await Schedule.findOne({ classNo: req.params.classNo });
@@ -1462,7 +2832,7 @@ app.get("/api/schedule/:classNo", async (req, res) => {
 // --- DATESHEET ENDPOINTS ---
 app.post("/api/datesheet", async (req, res) => {
     try {
-        const { classNo, examType, exams } = req.body;
+        const { classNo, examType, exams, markedBy } = req.body;
         console.log(`[AUDIT] Publishing datesheet for Class: "${classNo}", Type: "${examType}", Exams: ${exams?.length}`);
 
         if (!classNo || !classNo.trim()) {
@@ -1472,6 +2842,42 @@ app.post("/api/datesheet", async (req, res) => {
             return res.status(400).json({ message: "Exam type is required." });
         }
 
+        // A teacher may only publish/update their own subject's exam entry.
+        // Whatever else is in the payload (other subjects, echoed back for
+        // display) is ignored rather than trusted - the merge below only ever
+        // touches the row matching their own subject, ownership enforced
+        // server-side regardless of what the client sends.
+        const teacher = markedBy
+            ? await Teacher.findOne({ teacherEmail: String(markedBy).toLowerCase().trim() }).lean()
+            : null;
+
+        if (teacher) {
+            const mySubject = teacher.subject || '';
+            const myRow = (exams || []).find(ex => normalizeSubject(ex.subject) === normalizeSubject(mySubject));
+
+            if (myRow) {
+                const auth = await teacherAuthorizedForClassSubject(teacher.teacherEmail, classNo, mySubject);
+                if (!auth.ok) return res.status(403).json({ message: auth.message });
+            }
+
+            const existing = await Datesheet.findOne({ classNo: classNo.trim(), examType: examType.trim() }).lean();
+            const otherSubjectsExams = (existing?.exams || []).filter(
+                ex => normalizeSubject(ex.subject) !== normalizeSubject(mySubject)
+            );
+            // Omitting the row (e.g. the teacher cleared it) removes it - the
+            // merge only ever adds/updates/removes their own subject's entry.
+            const mergedExams = myRow ? [...otherSubjectsExams, myRow] : otherSubjectsExams;
+
+            const result = await Datesheet.findOneAndUpdate(
+                { classNo: classNo.trim(), examType: examType.trim() },
+                { exams: mergedExams },
+                { upsert: true, new: true }
+            );
+            console.log(`[AUDIT] Datesheet saved with _id: ${result._id}, classNo: "${result.classNo}" (teacher: ${teacher.teacherEmail}, subject: ${mySubject})`);
+            return res.json({ message: "Datesheet updated successfully" });
+        }
+
+        // Admin (or no teacher match): unrestricted full replace, as before.
         const result = await Datesheet.findOneAndUpdate(
             { classNo: classNo.trim(), examType: examType.trim() },
             { exams },

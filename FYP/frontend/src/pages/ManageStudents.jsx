@@ -312,7 +312,7 @@ const ManageStudents = () => {
                                                 <Col md={6}>
                                                     <Form.Group className="mb-3">
                                                         <Form.Label className="small fw-bold">Age</Form.Label>
-                                                        <Form.Control required type="number" name="studentAge" max="15" title="Age cannot exceed 15" value={formData.studentAge} onChange={handleChange} placeholder="e.g. 15" />
+                                                        <Form.Control required type="number" name="studentAge" min="3" max="22" title="Age must be between 3 and 22" value={formData.studentAge} onChange={handleChange} placeholder="e.g. 15" />
                                                     </Form.Group>
                                                 </Col>
                                                 <Col md={6}>

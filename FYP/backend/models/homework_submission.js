@@ -23,6 +23,10 @@ const HomeworkSubmissionSchema = new schema({
         type: String,
         enum: ['Pending', 'Submitted'],
         default: 'Pending'
+    },
+    lateNotifiedAt: {
+        type: Date,
+        default: null
     }
 }, { timestamps: true });
 

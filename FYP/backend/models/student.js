@@ -15,8 +15,8 @@ const Student = new schema(
         studentAge: {
             type: Number,
             required: true,
-            max: [15, 'Age cannot exceed 15'],
-            min: [5, 'Age cannot be less than 5']
+            max: [22, 'Age cannot exceed 22'],
+            min: [3, 'Age cannot be less than 3']
         },
         studentRollNo: {
             type: String,

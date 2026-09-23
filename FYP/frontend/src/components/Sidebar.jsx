@@ -2,10 +2,37 @@ import React, { useRef, useState, useEffect } from 'react';
 import { Nav, Offcanvas, Modal, Button, Form, Spinner } from 'react-bootstrap';
 import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
-import logo from '../assets/logo.png';
+import reversedLogo from '../assets/eduguardian-logo-reversed.svg';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const DEFAULT_AVATAR = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='90' height='90' viewBox='0 0 90 90'%3E%3Ccircle cx='45' cy='45' r='45' fill='%23374151'/%3E%3Ccircle cx='45' cy='34' r='18' fill='%236B7280'/%3E%3Cellipse cx='45' cy='80' rx='28' ry='22' fill='%236B7280'/%3E%3C/svg%3E";
+
+const entityThemes = {
+    Students: {
+        gradient: 'linear-gradient(135deg, rgb(125, 78, 84) 0%, rgb(160, 125, 130) 100%)',
+        soft: 'rgba(145, 105, 110, 0.1)',
+        accent: 'rgb(125, 78, 84)',
+        iconBg: 'rgba(145, 105, 110, 0.14)',
+        button: 'linear-gradient(135deg, rgb(125, 78, 84) 0%, rgb(160, 125, 130) 100%)',
+        buttonText: '#ffffff'
+    },
+    Teachers: {
+        gradient: 'linear-gradient(135deg, rgb(145, 105, 110) 0%, rgb(180, 150, 154) 100%)',
+        soft: 'rgba(145, 105, 110, 0.1)',
+        accent: 'rgb(125, 78, 84)',
+        iconBg: 'rgba(145, 105, 110, 0.14)',
+        button: 'linear-gradient(135deg, rgb(145, 105, 110) 0%, rgb(180, 150, 154) 100%)',
+        buttonText: '#ffffff'
+    },
+    Parents: {
+        gradient: 'linear-gradient(135deg, rgb(160, 125, 130) 0%, rgb(205, 185, 188) 100%)',
+        soft: 'rgba(160, 125, 130, 0.12)',
+        accent: 'rgb(125, 78, 84)',
+        iconBg: 'rgba(160, 125, 130, 0.16)',
+        button: 'linear-gradient(135deg, rgb(160, 125, 130) 0%, rgb(205, 185, 188) 100%)',
+        buttonText: '#ffffff'
+    }
+};
 
 const Sidebar = ({ showMobileSidebar, onHideMobileSidebar }) => {
     const navigate = useNavigate();
@@ -129,7 +156,7 @@ const Sidebar = ({ showMobileSidebar, onHideMobileSidebar }) => {
         <>
             {/* Sidebar Branding & Back Button */}
             <div className="p-3 mb-2 d-flex align-items-center border-bottom border-secondary">
-                <div className="d-flex gap-1 me-2">
+                <div className="me-2">
                     <button
                         onClick={() => navigate(-1)}
                         className="btn btn-sm btn-outline-secondary text-white border-0 p-1"
@@ -137,17 +164,9 @@ const Sidebar = ({ showMobileSidebar, onHideMobileSidebar }) => {
                     >
                         <i className="bi bi-arrow-left fs-5"></i>
                     </button>
-                    <button
-                        onClick={() => navigate(1)}
-                        className="btn btn-sm btn-outline-secondary text-white border-0 p-1"
-                        title="Go Forward"
-                    >
-                        <i className="bi bi-arrow-right fs-5"></i>
-                    </button>
                 </div>
                 <div className="d-flex align-items-center cursor-pointer" onClick={() => navigate('/')} style={{ cursor: 'pointer' }}>
-                    <img src={logo} alt="EduGuardian" height="40" className="me-2 rounded-circle shadow-sm" />
-                    <h5 className="mb-0 fw-bold text-white ls-1" style={{ fontSize: '1.1rem' }}>EduGuardian</h5>
+                    <img src={reversedLogo} alt="EduGuardian" className="sidebar-wordmark" />
                 </div>
             </div>
 
@@ -310,7 +329,7 @@ const Sidebar = ({ showMobileSidebar, onHideMobileSidebar }) => {
                         {navLink('/manage-results', 'bi-award-fill', 'Manage Results')}
                         {navLink('/manage-datesheet', 'bi-calendar-event', 'Manage Exams')}
                         {navLink('/homework', 'bi-book-fill', 'Homework')}
-                        {navLink('/schedule', 'bi-calendar3', 'Class Schedule')}
+                        {navLink('/schedule', 'bi-calendar3', 'My Timetable')}
                     </>
                 )}
 
@@ -346,15 +365,15 @@ const Sidebar = ({ showMobileSidebar, onHideMobileSidebar }) => {
         <>
             {/* Desktop Static Sidebar */}
             <div
-                className="bg-dark d-none d-md-flex flex-column shadow flex-shrink-0"
-                style={{ width: '280px', position: 'fixed', top: 0, left: 0, height: '100vh', overflowY: 'auto', zIndex: 1050 }}
+                className="app-sidebar bg-dark d-flex flex-column shadow flex-shrink-0"
+                style={{ width: '248px', position: 'fixed', top: 0, left: 0, height: '100vh', overflowY: 'auto', zIndex: 1050 }}
                 onClick={() => setShowPicMenu(false)}
             >
                 {sidebarContent}
             </div>
 
             {/* Mobile Offcanvas Sidebar */}
-            <Offcanvas show={showMobileSidebar} onHide={onHideMobileSidebar} className="bg-dark text-white shadow" style={{ width: '280px' }}>
+            <Offcanvas show={false} onHide={onHideMobileSidebar} className="mobile-sidebar bg-dark text-white shadow">
                 <Offcanvas.Body className="p-0 d-flex flex-column h-100" onClick={() => setShowPicMenu(false)}>
                     {sidebarContent}
                 </Offcanvas.Body>
@@ -373,110 +392,163 @@ const Sidebar = ({ showMobileSidebar, onHideMobileSidebar }) => {
                 onHide={() => setEntityDialog(null)}
                 centered
                 size="sm"
+                dialogClassName="entity-dialog"
             >
                 {entityDialog && (
                     <>
-                        <Modal.Header closeButton className="border-0 pb-0">
-                            <Modal.Title className="fw-bold fs-5">
-                                <i className={`bi ${entityDialog.step === 'class' ? 'bi-filter-circle-fill' : 'bi-grid-3x3-gap-fill'} me-2 text-primary`}></i>
-                                {entityDialog.step === 'class' ? `Select Class` : entityDialog.label}
-                            </Modal.Title>
-                        </Modal.Header>
-                        <Modal.Body className="px-4 pb-4 pt-2">
-                            {entityDialog.step === 'action' ? (
-                                <>
-                                    <p className="text-muted small mb-4">What would you like to do?</p>
-                                    <div className="d-flex flex-column gap-3">
-                                        <Button
-                                            variant="primary"
-                                            className="rounded-3 py-3 fw-bold d-flex align-items-center gap-3 shadow-sm"
-                                            onClick={() => {
-                                                const path = entityDialog.addPath;
-                                                setEntityDialog(null);
-                                                navigate(path, { state: { email, role, uname, openAdd: true } });
-                                            }}
+                        <Modal.Body className="p-0 overflow-hidden rounded-4 border-0">
+                            <div style={{ background: entityThemes[entityDialog.label]?.gradient || entityThemes.Students.gradient, color: '#fff' }} className="px-4 py-3">
+                                <div className="d-flex align-items-center justify-content-between gap-3">
+                                    <div className="d-flex align-items-center gap-3">
+                                        <div
+                                            className="rounded-circle d-flex align-items-center justify-content-center"
+                                            style={{ width: '42px', height: '42px', background: 'rgba(255,255,255,0.18)', backdropFilter: 'blur(8px)' }}
                                         >
-                                            <div className="bg-white bg-opacity-25 rounded-2 p-2 d-flex align-items-center justify-content-center" style={{ width: '36px', height: '36px' }}>
-                                                <i className="bi bi-person-plus-fill fs-5"></i>
+                                            <i className={`bi ${entityDialog.step === 'class' ? 'bi-filter-circle-fill' : 'bi-grid-3x3-gap-fill'} fs-5`}></i>
+                                        </div>
+                                        <div>
+                                            <div className="small text-white-50 text-uppercase fw-semibold" style={{ letterSpacing: '1px' }}>
+                                                {entityDialog.step === 'class' ? 'Class Selection' : 'Quick Action'}
                                             </div>
-                                            <div className="text-start">
-                                                <div>Add New</div>
-                                                <div className="fw-normal opacity-75" style={{ fontSize: '0.75rem' }}>Register a new {entityDialog.label.slice(0, -1)}</div>
+                                            <div className="fw-bold fs-5 mb-0">
+                                                {entityDialog.step === 'class' ? 'Select Class' : entityDialog.label}
                                             </div>
-                                        </Button>
-                                        <Button
-                                            variant="outline-primary"
-                                            className="rounded-3 py-3 fw-bold d-flex align-items-center gap-3"
-                                            onClick={() => {
-                                                if (entityDialog.label === 'Teachers') {
-                                                    setEntityDialog(null);
-                                                    navigate(entityDialog.managePath, { state: { email, role, uname } });
-                                                } else if (entityDialog.label === 'Students') {
-                                                    setEntityDialog(null);
-                                                    navigate('/manage-classes', { state: { email, role, uname } });
-                                                } else if (entityDialog.label === 'Parents') {
-                                                    setEntityDialog(null);
-                                                    navigate('/parent-hub', { state: { email, role, uname } });
-                                                } else {
-                                                    setEntityDialog(prev => ({ ...prev, step: 'class' }));
-                                                }
-                                            }}
-                                        >
-                                            <div className="rounded-2 p-2 d-flex align-items-center justify-content-center" style={{ width: '36px', height: '36px', background: '#e8f0fe' }}>
-                                                <i className="bi bi-list-ul fs-5"></i>
-                                            </div>
-                                            <div className="text-start">
-                                                <div>Manage Existing</div>
-                                                <div className="fw-normal text-muted" style={{ fontSize: '0.75rem' }}>View & edit all {entityDialog.label}</div>
-                                            </div>
-                                        </Button>
+                                        </div>
                                     </div>
-                                </>
-                            ) : (
-                                <>
-                                    <p className="text-muted small mb-3">Which class would you like to view?</p>
-                                    {loadingClasses ? (
-                                        <div className="text-center py-4">
-                                            <Spinner animation="border" variant="primary" size="sm" />
-                                            <p className="mt-2 small text-muted">Loading classes...</p>
-                                        </div>
-                                    ) : classes.length === 0 ? (
-                                        <div className="text-center py-3">
-                                            <p className="small text-warning mb-3">No classes found in records.</p>
-                                            <Button variant="secondary" size="sm" onClick={() => setEntityDialog(prev => ({ ...prev, step: 'action' }))}>Back</Button>
-                                        </div>
-                                    ) : (
-                                        <div className="d-flex flex-column gap-2" style={{ maxHeight: '250px', overflowY: 'auto' }}>
-                                            {classes.map(cls => (
-                                                <Button
-                                                    key={cls}
-                                                    variant="light"
-                                                    className="text-start border-0 py-2 px-3 rounded-3 hover-bg-primary-subtle"
-                                                    onClick={() => {
-                                                        setEntityDialog(null);
-                                                        navigate('/manage-classes', { state: { email, role, uname, classFilter: cls } });
-                                                    }}
-                                                >
-                                                    <i className="bi bi-arrow-right-short me-2 text-primary"></i>
-                                                    {cls}
-                                                </Button>
-                                            ))}
-                                            <hr className="my-2 opacity-10" />
+                                    <button
+                                        type="button"
+                                        className="btn-close btn-close-white"
+                                        aria-label="Close"
+                                        onClick={() => setEntityDialog(null)}
+                                        style={{ opacity: 1 }}
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="px-4 pb-4 pt-3" style={{ background: '#f9fafb' }}>
+                                {entityDialog.step === 'action' ? (
+                                    <>
+                                        <p className="text-muted small mb-4">Choose the next step for {entityDialog.label.toLowerCase()} management.</p>
+                                        <div className="d-flex flex-column gap-3">
                                             <Button
-                                                variant="link"
-                                                className="text-decoration-none text-muted small p-0 fw-bold"
-                                                onClick={() => setEntityDialog(prev => ({ ...prev, step: 'action' }))}
+                                                className="rounded-4 py-3 fw-bold d-flex align-items-center gap-3 border-0 shadow-sm"
+                                                style={{
+                                                    background: entityThemes[entityDialog.label]?.button || entityThemes.Students.button,
+                                                    color: entityThemes[entityDialog.label]?.buttonText || '#fff',
+                                                    boxShadow: '0 12px 30px rgba(31, 41, 55, 0.12)'
+                                                }}
+                                                onClick={() => {
+                                                    const path = entityDialog.addPath;
+                                                    setEntityDialog(null);
+                                                    navigate(path, { state: { email, role, uname, openAdd: true } });
+                                                }}
                                             >
-                                                <i className="bi bi-chevron-left me-1"></i>Back
+                                                <div className="rounded-3 d-flex align-items-center justify-content-center" style={{ width: '38px', height: '38px', background: 'rgba(255,255,255,0.18)' }}>
+                                                    <i className="bi bi-person-plus-fill fs-5"></i>
+                                                </div>
+                                                <div className="text-start flex-grow-1">
+                                                    <div>Add New</div>
+                                                    <div className="fw-normal" style={{ fontSize: '0.75rem', opacity: 0.8 }}>Register a new {entityDialog.label.slice(0, -1)}</div>
+                                                </div>
+                                            </Button>
+                                            <Button
+                                                variant="outline-light"
+                                                className="rounded-4 py-3 fw-bold d-flex align-items-center gap-3 border"
+                                                style={{
+                                                    background: entityThemes[entityDialog.label]?.soft || '#eef2ff',
+                                                    color: entityThemes[entityDialog.label]?.accent || 'rgb(125, 78, 84)',
+                                                    borderColor: entityThemes[entityDialog.label]?.accent || 'rgb(125, 78, 84)',
+                                                    boxShadow: '0 10px 20px rgba(15, 23, 42, 0.04)'
+                                                }}
+                                                onClick={() => {
+                                                    if (entityDialog.label === 'Teachers') {
+                                                        setEntityDialog(null);
+                                                        navigate(entityDialog.managePath, { state: { email, role, uname } });
+                                                    } else if (entityDialog.label === 'Students') {
+                                                        setEntityDialog(null);
+                                                        navigate('/manage-classes', { state: { email, role, uname } });
+                                                    } else if (entityDialog.label === 'Parents') {
+                                                        setEntityDialog(null);
+                                                        navigate('/parent-hub', { state: { email, role, uname } });
+                                                    } else {
+                                                        setEntityDialog(prev => ({ ...prev, step: 'class' }));
+                                                    }
+                                                }}
+                                            >
+                                                <div className="rounded-3 d-flex align-items-center justify-content-center" style={{ width: '38px', height: '38px', background: entityThemes[entityDialog.label]?.iconBg || '#e0e7ff' }}>
+                                                    <i className="bi bi-list-ul fs-5"></i>
+                                                </div>
+                                                <div className="text-start flex-grow-1">
+                                                    <div>Manage Existing</div>
+                                                    <div className="fw-normal" style={{ fontSize: '0.75rem', opacity: 0.8 }}>View & edit all {entityDialog.label}</div>
+                                                </div>
                                             </Button>
                                         </div>
-                                    )}
-                                </>
-                            )}
+                                    </>
+                                ) : (
+                                    <>
+                                        <p className="text-muted small mb-3">Which class would you like to view?</p>
+                                        {loadingClasses ? (
+                                            <div className="text-center py-4">
+                                                <Spinner animation="border" variant="primary" size="sm" />
+                                                <p className="mt-2 small text-muted">Loading classes...</p>
+                                            </div>
+                                        ) : classes.length === 0 ? (
+                                            <div className="text-center py-3">
+                                                <p className="small text-warning mb-3">No classes found in records.</p>
+                                                <Button variant="secondary" size="sm" onClick={() => setEntityDialog(prev => ({ ...prev, step: 'action' }))}>Back</Button>
+                                            </div>
+                                        ) : (
+                                            <div className="d-flex flex-column gap-2" style={{ maxHeight: '250px', overflowY: 'auto' }}>
+                                                {classes.map(cls => (
+                                                    <Button
+                                                        key={cls}
+                                                        variant="light"
+                                                        className="text-start border-0 py-2 px-3 rounded-3"
+                                                        style={{ background: '#ffffff', border: '1px solid #edf2f7', color: '#1f2937' }}
+                                                        onClick={() => {
+                                                            setEntityDialog(null);
+                                                            navigate('/manage-classes', { state: { email, role, uname, classFilter: cls } });
+                                                        }}
+                                                    >
+                                                        <i className="bi bi-arrow-right-short me-2" style={{ color: entityThemes[entityDialog.label]?.accent || 'rgb(125, 78, 84)' }}></i>
+                                                        {cls}
+                                                    </Button>
+                                                ))}
+                                                <hr className="my-2 opacity-10" />
+                                                <Button
+                                                    variant="link"
+                                                    className="text-decoration-none small p-0 fw-bold"
+                                                    style={{ color: entityThemes[entityDialog.label]?.accent || 'rgb(125, 78, 84)' }}
+                                                    onClick={() => setEntityDialog(prev => ({ ...prev, step: 'action' }))}
+                                                >
+                                                    <i className="bi bi-chevron-left me-1"></i>Back
+                                                </Button>
+                                            </div>
+                                        )}
+                                    </>
+                                )}
+                            </div>
                         </Modal.Body>
                     </>
                 )}
             </Modal>
+
+            <style>{`
+                @keyframes fadeInDown {
+                    from { opacity: 0; transform: translateY(-6px); }
+                    to   { opacity: 1; transform: translateY(0); }
+                }
+                .entity-dialog .modal-content {
+                    border: 0;
+                    border-radius: 24px;
+                    overflow: hidden;
+                    box-shadow: 0 20px 50px rgba(15, 23, 42, 0.18);
+                }
+                .entity-dialog .btn-close:focus {
+                    box-shadow: none;
+                }
+            `}</style>
         </>
     );
 };

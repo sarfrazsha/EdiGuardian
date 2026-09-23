@@ -39,6 +39,12 @@ const ParentHub = () => {
         p.studentName.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
+    const getStudentImage = (image) => {
+        if (!image) return '';
+        if (image.startsWith('http') || image.startsWith('/')) return image;
+        return `/uploads/${image.startsWith('images/') ? image : `images/${image}`}`;
+    };
+
     return (
         <Layout>
             <Container fluid className="py-4">
@@ -73,7 +79,7 @@ const ParentHub = () => {
                             </Col>
                             <Col md={4} className="text-md-end text-center">
                                 <Badge bg="primary" className="bg-opacity-10 text-primary px-3 py-2 rounded-pill fw-bold">
-                                    Total Households: {parents.length}
+                                    {/* Total Households: {parents.length} */}
                                 </Badge>
                             </Col>
                         </Row>
@@ -86,9 +92,9 @@ const ParentHub = () => {
                             <Table hover className="align-middle mb-0 custom-table">
                                 <thead className="bg-light text-secondary small fw-bold">
                                     <tr>
-                                        <th className="ps-4">Guardian Name</th>
+                                        <th className="ps-4">Linked Child</th>
+                                        <th>Parent Name</th>
                                         <th>Contact Details</th>
-                                        <th>Linked Child</th>
                                         <th className="text-center">Class</th>
                                         <th className="text-center">Actions</th>
                                     </tr>
@@ -99,22 +105,34 @@ const ParentHub = () => {
                                     ) : filteredParents.length > 0 ? filteredParents.map((p, idx) => (
                                         <tr key={idx}>
                                             <td className="ps-4">
-                                                <div className="d-flex align-items-center">
-                                                    <div className="bg-primary bg-opacity-10 text-primary rounded-circle d-flex align-items-center justify-content-center me-3" style={{ width: '40px', height: '40px' }}>
-                                                        <i className="bi bi-person-fill fs-5"></i>
-                                                    </div>
+                                                <div className="d-flex align-items-center gap-2">
+                                                    {getStudentImage(p.studentImage) ? (
+                                                        <img
+                                                            src={getStudentImage(p.studentImage)}
+                                                            alt={p.studentName}
+                                                            className="rounded-circle border"
+                                                            style={{ width: '38px', height: '38px', objectFit: 'cover' }}
+                                                            onError={(event) => {
+                                                                event.currentTarget.style.display = 'none';
+                                                            }}
+                                                        />
+                                                    ) : (
+                                                        <div className="bg-light text-muted rounded-circle d-flex align-items-center justify-content-center" style={{ width: '38px', height: '38px' }}>
+                                                            <i className="bi bi-person-fill"></i>
+                                                        </div>
+                                                    )}
                                                     <div>
-                                                        <div className="fw-bold text-dark">{p.parentName}</div>
+                                                        <div className="fw-bold text-dark">{p.studentName}</div>
+                                                        <div className="small text-muted">Primary Student</div>
                                                     </div>
                                                 </div>
                                             </td>
                                             <td>
-                                                <div className="small fw-medium text-dark"><i className="bi bi-envelope-at me-2 text-primary"></i>{p.parentEmail}</div>
-                                                <div className="small text-muted mt-1"><i className="bi bi-telephone me-2 text-success"></i>{p.parentPhone}</div>
+                                                <div className="text-dark">{p.parentName}</div>
                                             </td>
                                             <td>
-                                                <div className="fw-bold text-dark">{p.studentName}</div>
-                                                <div className="small text-muted">Primary Student</div>
+                                                <div className="small fw-medium text-dark"><i className="bi bi-envelope-at me-2 text-primary"></i>{p.parentEmail}</div>
+                                                <div className="small text-muted mt-1"><i className="bi bi-telephone me-2 text-success"></i>{p.parentPhone}</div>
                                             </td>
                                             <td className="text-center">
                                                 <Badge bg="info" className="bg-opacity-10 text-info px-3 py-2 rounded-pill fw-bold">

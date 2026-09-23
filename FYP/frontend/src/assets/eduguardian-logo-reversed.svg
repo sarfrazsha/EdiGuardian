@@ -1,0 +1,9 @@
+<svg width="320" height="72" viewBox="0 0 320 72" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="EduGuardian">
+<g transform="translate(2,3)">
+<path d="M20 1 L37 8 L37 25 C37 36 30 43 20 47 C10 43 3 36 3 25 L3 8 Z" fill="#E8734F"/>
+<path d="M11 20 L20 16 L20 34 L11 38 Z" fill="#14243F" opacity="0.85"/>
+<path d="M29 20 L20 16 L20 34 L29 38 Z" fill="#14243F" opacity="0.85"/>
+<line x1="20" y1="15" x2="20" y2="35" stroke="#F4EFE6" stroke-width="1.2"/>
+</g>
+<text x="56" y="45" font-family="Georgia, 'Times New Roman', serif" font-weight="700" font-size="26" fill="#FFFFFF">EduGuardian</text>
+</svg>

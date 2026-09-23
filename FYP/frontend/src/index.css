@@ -1,4 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap');
 
 :root {
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
@@ -106,8 +107,8 @@ button:focus-visible {
 
 :root {
   /* Playful, Kid-Friendly, yet Professional Color Palette */
-  --bs-primary: #4361ee !important;      
-  --bs-primary-rgb: 67, 97, 238 !important;
+  --bs-primary: rgb(145, 105, 110) !important;
+  --bs-primary-rgb: 145, 105, 110 !important;
   --bs-secondary: #64748b !important;    
   --bs-secondary-rgb: 100, 116, 139 !important;
   --bs-success: #4cc9f0 !important;      
@@ -116,15 +117,15 @@ button:focus-visible {
   --bs-info-rgb: 248, 150, 30 !important;
   --bs-warning: #f9c74f !important;      
   --bs-warning-rgb: 249, 199, 79 !important;
-  --bs-danger: #ef476f !important;       
-  --bs-danger-rgb: 239, 71, 111 !important;
+  --bs-danger: rgb(125, 78, 84) !important;
+  --bs-danger-rgb: 125, 78, 84 !important;
   
   --bs-body-font-family: 'Nunito', system-ui, -apple-system, sans-serif !important;
   font-family: var(--bs-body-font-family);
 }
 
 body {
-  background-color: #f4f7fe; 
+  background-color: #FBFAF7;
   font-family: var(--bs-body-font-family);
 }
 
@@ -136,13 +137,16 @@ body {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #4361ee, #3a0ca3) !important;
-  border: none !important;
+  background: rgb(145, 105, 110) !important;
+  border: 1px solid rgb(145, 105, 110) !important;
+  color: #FFFFFF !important;
 }
 
 .btn-primary:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 15px rgba(67, 97, 238, 0.3) !important;
+  background: rgb(125, 78, 84) !important;
+  border-color: rgb(125, 78, 84) !important;
+  box-shadow: 0 8px 15px rgba(125, 78, 84, 0.25) !important;
 }
 
 #root {
@@ -150,4 +154,4 @@ body {
   margin: 0;
   padding: 0;
 }
-
+

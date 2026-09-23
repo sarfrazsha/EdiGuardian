@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Container, Card, Table, Form, Button, Row, Col, Badge, Spinner, Modal } from 'react-bootstrap';
+import { Container, Card, Table, Form, Button, Row, Col, Badge, Spinner } from 'react-bootstrap';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import Axios from 'axios';
@@ -7,34 +7,63 @@ import Axios from 'axios';
 const ManageDateSheet = () => {
     const navigate = useNavigate();
     const userRole = localStorage.getItem('userRole');
+    const isTeacher = userRole?.toLowerCase() === 'teacher';
     const userEmail = localStorage.getItem('userEmail');
 
-    const [teacherData, setTeacherData] = useState(null);
+    // Admin: full free-form control over every subject's exam row.
     const [datesheet, setDatesheet] = useState({
         classNo: '',
         examType: '',
         exams: []
     });
+
+    // Teacher: locked to their own subject's single exam row. Every other
+    // subject already on the datesheet is shown but read-only, clearly
+    // labelled so it's obvious whose exam it is.
+    const [teacherSubject, setTeacherSubject] = useState('');
+    const [myExam, setMyExam] = useState({ date: '', startTime: '', endTime: '', room: '' });
+    const [otherExams, setOtherExams] = useState([]);
+
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [classes, setClasses] = useState([]);
 
+    // Multi-class support for teachers
+    const rawTeacherClasses = localStorage.getItem('teacherClasses');
+    const teacherClasses = (() => {
+        try { return JSON.parse(rawTeacherClasses) || []; } catch { return []; }
+    })();
+    const teacherClassSingle = localStorage.getItem('teacherClass');
+    const allTeacherClasses = teacherClasses.length > 0
+        ? [...new Set(teacherClasses)]
+        : (teacherClassSingle ? [teacherClassSingle] : []);
+
     useEffect(() => {
         const initializeData = async () => {
-            if (userRole === 'teacher') {
+            if (isTeacher) {
                 try {
-                    console.log(`[ManageDateSheet] Forcing fresh fetch for teacher: ${userEmail}`);
-                    const stats = await Axios.get(`/api/teacher/stats/${userEmail?.trim()}`);
-                    const fetchedClass = stats.data.className;
-                    console.log(`[ManageDateSheet] Fetched class: ${fetchedClass}`);
+                    const assignRes = await Axios.get(`/api/teacher/assignments/${encodeURIComponent(userEmail || '')}`);
+                    const mySubject = assignRes.data?.primarySubject || localStorage.getItem('teacherSubject') || '';
+                    setTeacherSubject(mySubject);
 
-                    if (fetchedClass && fetchedClass !== 'Not Assigned' && fetchedClass !== 'null' && fetchedClass !== 'undefined') {
-                        localStorage.setItem('teacherClass', fetchedClass);
-                        setDatesheet(prev => ({ ...prev, classNo: fetchedClass }));
-                        await fetchTeacherInfo(fetchedClass);
+                    let classesToUse = allTeacherClasses;
+                    if (classesToUse.length === 0) {
+                        const stats = await Axios.get(`/api/teacher/stats/${userEmail?.trim()}`);
+                        const fetchedClasses = stats.data.classes || [];
+                        const fetchedClass = stats.data.className;
+                        classesToUse = fetchedClasses.length > 0 ? fetchedClasses : (fetchedClass && fetchedClass !== 'Not Assigned' ? [fetchedClass] : []);
+                        if (classesToUse.length > 0) {
+                            localStorage.setItem('teacherClasses', JSON.stringify(classesToUse));
+                            localStorage.setItem('teacherClass', classesToUse[0]);
+                        }
+                    }
+
+                    if (classesToUse.length > 0) {
+                        const firstClass = classesToUse[0];
+                        setDatesheet(prev => ({ ...prev, classNo: firstClass }));
+                        await fetchTeacherInfo(firstClass, mySubject);
                     } else {
-                        console.warn(`[ManageDateSheet] Invalid class returned: ${fetchedClass}`);
-                        setDatesheet(prev => ({ ...prev, classNo: '' })); // Force empty so badge says "No Class Selected"
+                        setDatesheet(prev => ({ ...prev, classNo: '' }));
                         setLoading(false);
                     }
                 } catch (err) {
@@ -50,7 +79,9 @@ const ManageDateSheet = () => {
         };
 
         initializeData();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
 
     const fetchClasses = async () => {
         try {
@@ -61,19 +92,35 @@ const ManageDateSheet = () => {
         }
     };
 
-    const fetchTeacherInfo = async (className) => {
+    const fetchTeacherInfo = async (className, subjectOverride) => {
+        const mySubject = (subjectOverride ?? teacherSubject).toLowerCase().trim();
         try {
             const dsRes = await Axios.get(`/api/datesheet/${className}`);
             if (dsRes.data && dsRes.data.length > 0) {
                 const latest = dsRes.data[0];
+                const examsList = latest.exams.map(ex => ({
+                    ...ex,
+                    date: ex.date ? ex.date.split('T')[0] : ''
+                }));
                 setDatesheet({
                     classNo: latest.classNo,
                     examType: latest.examType,
-                    exams: latest.exams.map(ex => ({
-                        ...ex,
-                        date: ex.date ? ex.date.split('T')[0] : ''
-                    }))
+                    exams: examsList
                 });
+
+                if (isTeacher) {
+                    const mine = examsList.find(ex => (ex.subject || '').toLowerCase().trim() === mySubject);
+                    setMyExam(mine
+                        ? { date: mine.date, startTime: mine.startTime || '', endTime: mine.endTime || '', room: mine.room || '' }
+                        : { date: '', startTime: '', endTime: '', room: '' });
+                    setOtherExams(examsList.filter(ex => (ex.subject || '').toLowerCase().trim() !== mySubject));
+                }
+            } else {
+                setDatesheet(prev => ({ ...prev, classNo: className, examType: prev.examType || '', exams: [] }));
+                if (isTeacher) {
+                    setMyExam({ date: '', startTime: '', endTime: '', room: '' });
+                    setOtherExams([]);
+                }
             }
         } catch (err) {
             console.error("Error fetching existing datesheet:", err);
@@ -106,9 +153,26 @@ const ManageDateSheet = () => {
         });
     };
 
+    const handleUpdateMyExam = (field, value) => {
+        setMyExam(prev => ({ ...prev, [field]: value }));
+    };
+
+    const handleClearMyExam = () => {
+        if (!window.confirm(`Remove your ${teacherSubject} exam entry for this class?`)) return;
+        setMyExam({ date: '', startTime: '', endTime: '', room: '' });
+    };
+
     const handleSave = async () => {
-        if (!datesheet.examType || datesheet.exams.length === 0) {
-            alert("Please provide an exam type and at least one subject schedule.");
+        if (!datesheet.examType || !datesheet.examType.trim()) {
+            alert("Please provide an exam type.");
+            return;
+        }
+        if (isTeacher && !teacherSubject) {
+            alert("No subject is on file for your account - contact admin before publishing an exam entry.");
+            return;
+        }
+        if (!isTeacher && datesheet.exams.length === 0) {
+            alert("Please add at least one subject schedule.");
             return;
         }
 
@@ -129,16 +193,26 @@ const ManageDateSheet = () => {
             return;
         }
 
-        const payload = { ...datesheet, classNo };
+        // Teachers can only ever publish their own subject's row - leaving
+        // the date blank removes it (the backend deletes an omitted row
+        // rather than treating it as "no change").
+        const exams = isTeacher
+            ? (myExam.date ? [{ subject: teacherSubject, ...myExam }] : [])
+            : datesheet.exams;
+
+        const payload = { classNo, examType: datesheet.examType, exams, markedBy: userEmail };
         console.log("Publishing datesheet with payload:", payload);
 
         setSaving(true);
         try {
             await Axios.post('/api/datesheet', payload);
-            alert("Examination datesheet published successfully!");
+            alert(isTeacher
+                ? `Your ${teacherSubject} exam entry has been published.`
+                : "Examination datesheet published successfully!");
+            if (isTeacher) await fetchTeacherInfo(classNo, teacherSubject);
         } catch (err) {
             console.error("Error saving datesheet:", err);
-            alert("Failed to publish datesheet.");
+            alert(err.response?.data?.message || "Failed to publish datesheet.");
         } finally {
             setSaving(false);
         }
@@ -161,7 +235,8 @@ const ManageDateSheet = () => {
                         </Button>
                         <div>
                             <h2 className="fw-bold text-dark mb-0">Manage Datesheets</h2>
-                            <p className="text-muted mb-0">Publish and manage exam schedules for
+                            <p className="text-muted mb-0">
+                                {isTeacher ? `Publish your ${teacherSubject || 'subject'} exam for` : 'Publish and manage exam schedules for'}
                                 <Badge bg="primary" className="ms-2">{datesheet.classNo || ""}</Badge>
                             </p>
                         </div>
@@ -173,7 +248,7 @@ const ManageDateSheet = () => {
                         disabled={saving}
                     >
                         {saving ? <Spinner size="sm" className="me-2" /> : <i className="bi bi-cloud-arrow-up me-2"></i>}
-                        Publish Datesheet
+                        {isTeacher ? 'Publish My Exam' : 'Publish Datesheet'}
                     </Button>
                 </div>
 
@@ -215,106 +290,233 @@ const ManageDateSheet = () => {
                                             <Form.Text className="text-muted">Select the class for this datesheet.</Form.Text>
                                         </>
                                     )}
+                                    {isTeacher && allTeacherClasses.length > 1 && (
+                                        <>
+                                            <Form.Label className="small fw-bold text-muted">Select Class</Form.Label>
+                                            <Form.Select
+                                                value={datesheet.classNo}
+                                                onChange={(e) => {
+                                                    const cls = e.target.value;
+                                                    setDatesheet(prev => ({ classNo: cls, examType: '', exams: [] }));
+                                                    if (cls) fetchTeacherInfo(cls, teacherSubject);
+                                                }}
+                                                className="rounded-3"
+                                            >
+                                                {allTeacherClasses.map(cls => (
+                                                    <option key={cls} value={cls}>{cls}</option>
+                                                ))}
+                                            </Form.Select>
+                                            <Form.Text className="text-muted">Select which class to manage datesheet for.</Form.Text>
+                                        </>
+                                    )}
                                 </Form.Group>
+
                             </Card.Body>
                         </Card>
                     </Col>
 
                     <Col lg={8}>
-                        <Card className="border-0 shadow-sm rounded-4 mb-4 overflow-hidden">
-                            <Card.Header className="bg-primary bg-opacity-10 border-0 py-3 d-flex justify-content-between align-items-center">
-                                <h6 className="fw-bold text-primary mb-0">Subject Schedule</h6>
-                                <Button
-                                    variant="primary"
-                                    size="sm"
-                                    className="rounded-pill px-3 py-1"
-                                    onClick={handleAddExam}
-                                >
-                                    <i className="bi bi-plus-lg me-1"></i> Add Subject
-                                </Button>
-                            </Card.Header>
-                            <Card.Body className="p-0">
-                                <Table responsive hover className="mb-0 align-middle">
-                                    <thead className="bg-light small text-uppercase text-secondary">
-                                        <tr>
-                                            <th className="ps-4">Subject</th>
-                                            <th>Date</th>
-                                            <th>Time</th>
-                                            <th>Room / Location</th>
-                                            <th className="text-center">Action</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {datesheet.exams.map((ex, idx) => (
-                                            <tr key={idx}>
-                                                <td className="ps-4">
-                                                    <Form.Control
-                                                        size="sm"
-                                                        placeholder="e.g. Mathematics"
-                                                        value={ex.subject}
-                                                        onChange={(e) => handleUpdateExam(idx, 'subject', e.target.value)}
-                                                        className="rounded-2"
-                                                    />
-                                                </td>
-                                                <td>
+                        {isTeacher ? (
+                            <>
+                                <Card className="border-0 shadow-sm rounded-4 mb-4 overflow-hidden">
+                                    <Card.Header className="bg-primary bg-opacity-10 border-0 py-3">
+                                        <h6 className="fw-bold text-primary mb-0">
+                                            <i className="bi bi-person-check-fill me-2"></i>Your Subject: {teacherSubject || 'Not set'}
+                                        </h6>
+                                    </Card.Header>
+                                    <Card.Body className="p-4">
+                                        {teacherSubject ? (
+                                            <Row className="g-3 align-items-end">
+                                                <Col md={3}>
+                                                    <Form.Label className="small fw-bold text-secondary text-uppercase">Date</Form.Label>
                                                     <Form.Control
                                                         type="date"
-                                                        size="sm"
-                                                        value={ex.date}
-                                                        onChange={(e) => handleUpdateExam(idx, 'date', e.target.value)}
+                                                        value={myExam.date}
+                                                        onChange={(e) => handleUpdateMyExam('date', e.target.value)}
                                                         className="rounded-2"
                                                     />
-                                                </td>
-                                                <td>
-                                                    <div className="d-flex gap-1">
-                                                        <Form.Control
-                                                            size="sm"
-                                                            placeholder="Start"
-                                                            value={ex.startTime}
-                                                            onChange={(e) => handleUpdateExam(idx, 'startTime', e.target.value)}
-                                                            className="rounded-2"
-                                                        />
-                                                        <Form.Control
-                                                            size="sm"
-                                                            placeholder="End"
-                                                            value={ex.endTime}
-                                                            onChange={(e) => handleUpdateExam(idx, 'endTime', e.target.value)}
-                                                            className="rounded-2"
-                                                        />
-                                                    </div>
-                                                </td>
-                                                <td>
+                                                </Col>
+                                                <Col md={3}>
+                                                    <Form.Label className="small fw-bold text-secondary text-uppercase">Start Time</Form.Label>
                                                     <Form.Control
-                                                        size="sm"
-                                                        placeholder="e.g. Room 102"
-                                                        value={ex.room}
-                                                        onChange={(e) => handleUpdateExam(idx, 'room', e.target.value)}
+                                                        placeholder="Start"
+                                                        value={myExam.startTime}
+                                                        onChange={(e) => handleUpdateMyExam('startTime', e.target.value)}
                                                         className="rounded-2"
                                                     />
-                                                </td>
-                                                <td className="text-center">
-                                                    <Button
-                                                        variant="outline-danger"
-                                                        size="sm"
-                                                        className="rounded-circle border-0 p-1"
-                                                        onClick={() => handleRemoveExam(idx)}
-                                                    >
-                                                        <i className="bi bi-trash-fill"></i>
-                                                    </Button>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                        {datesheet.exams.length === 0 && (
-                                            <tr>
-                                                <td colSpan="5" className="text-center py-5 text-muted">
-                                                    No subjects added yet. Click "Add Subject" to begin.
-                                                </td>
-                                            </tr>
+                                                </Col>
+                                                <Col md={3}>
+                                                    <Form.Label className="small fw-bold text-secondary text-uppercase">End Time</Form.Label>
+                                                    <Form.Control
+                                                        placeholder="End"
+                                                        value={myExam.endTime}
+                                                        onChange={(e) => handleUpdateMyExam('endTime', e.target.value)}
+                                                        className="rounded-2"
+                                                    />
+                                                </Col>
+                                                <Col md={3}>
+                                                    <Form.Label className="small fw-bold text-secondary text-uppercase">Room</Form.Label>
+                                                    <Form.Control
+                                                        placeholder="e.g. Room 102"
+                                                        value={myExam.room}
+                                                        onChange={(e) => handleUpdateMyExam('room', e.target.value)}
+                                                        className="rounded-2"
+                                                    />
+                                                </Col>
+                                                {myExam.date && (
+                                                    <Col xs={12}>
+                                                        <Button variant="outline-danger" size="sm" className="rounded-pill" onClick={handleClearMyExam}>
+                                                            <i className="bi bi-trash-fill me-1"></i>Remove My Exam Entry
+                                                        </Button>
+                                                    </Col>
+                                                )}
+                                            </Row>
+                                        ) : (
+                                            <div className="text-muted small">
+                                                No subject is on file for your account. Contact admin to have a subject assigned before publishing an exam entry.
+                                            </div>
                                         )}
-                                    </tbody>
-                                </Table>
-                            </Card.Body>
-                        </Card>
+                                    </Card.Body>
+                                </Card>
+
+                                <Card className="border-0 shadow-sm rounded-4 mb-4 overflow-hidden">
+                                    <Card.Header className="bg-light border-0 py-3">
+                                        <h6 className="fw-bold text-secondary mb-0">
+                                            <i className="bi bi-lock-fill me-2"></i>Other Subjects (Read-only)
+                                        </h6>
+                                    </Card.Header>
+                                    <Card.Body className="p-0">
+                                        <Table responsive hover className="mb-0 align-middle">
+                                            <thead className="bg-light small text-uppercase text-secondary">
+                                                <tr>
+                                                    <th className="ps-4">Subject</th>
+                                                    <th>Date</th>
+                                                    <th>Time</th>
+                                                    <th>Room / Location</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {otherExams.map((ex, idx) => (
+                                                    <tr key={idx} className="text-muted" title={`Locked: reserved for the ${ex.subject} teacher`}>
+                                                        <td className="ps-4 fw-bold">
+                                                            {ex.subject}
+                                                            <Badge bg="secondary" className="bg-opacity-10 text-secondary border ms-2 fw-normal">
+                                                                <i className="bi bi-lock-fill me-1"></i>Locked
+                                                            </Badge>
+                                                        </td>
+                                                        <td>{ex.date || '-'}</td>
+                                                        <td>{ex.startTime && ex.endTime ? `${ex.startTime} - ${ex.endTime}` : '-'}</td>
+                                                        <td>{ex.room || '-'}</td>
+                                                    </tr>
+                                                ))}
+                                                {otherExams.length === 0 && (
+                                                    <tr>
+                                                        <td colSpan="4" className="text-center py-4 text-muted small fst-italic">
+                                                            No other subjects have published an exam for this class/exam type yet.
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </tbody>
+                                        </Table>
+                                    </Card.Body>
+                                </Card>
+                            </>
+                        ) : (
+                            <Card className="border-0 shadow-sm rounded-4 mb-4 overflow-hidden">
+                                <Card.Header className="bg-primary bg-opacity-10 border-0 py-3 d-flex justify-content-between align-items-center">
+                                    <h6 className="fw-bold text-primary mb-0">Subject Schedule</h6>
+                                    <Button
+                                        variant="primary"
+                                        size="sm"
+                                        className="rounded-pill px-3 py-1"
+                                        onClick={handleAddExam}
+                                    >
+                                        <i className="bi bi-plus-lg me-1"></i> Add Subject
+                                    </Button>
+                                </Card.Header>
+                                <Card.Body className="p-0">
+                                    <Table responsive hover className="mb-0 align-middle">
+                                        <thead className="bg-light small text-uppercase text-secondary">
+                                            <tr>
+                                                <th className="ps-4">Subject</th>
+                                                <th>Date</th>
+                                                <th>Time</th>
+                                                <th>Room / Location</th>
+                                                <th className="text-center">Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {datesheet.exams.map((ex, idx) => (
+                                                <tr key={idx}>
+                                                    <td className="ps-4">
+                                                        <Form.Control
+                                                            size="sm"
+                                                            placeholder="e.g. Mathematics"
+                                                            value={ex.subject}
+                                                            onChange={(e) => handleUpdateExam(idx, 'subject', e.target.value)}
+                                                            className="rounded-2"
+                                                        />
+                                                    </td>
+                                                    <td>
+                                                        <Form.Control
+                                                            type="date"
+                                                            size="sm"
+                                                            value={ex.date}
+                                                            onChange={(e) => handleUpdateExam(idx, 'date', e.target.value)}
+                                                            className="rounded-2"
+                                                        />
+                                                    </td>
+                                                    <td>
+                                                        <div className="d-flex gap-1">
+                                                            <Form.Control
+                                                                size="sm"
+                                                                placeholder="Start"
+                                                                value={ex.startTime}
+                                                                onChange={(e) => handleUpdateExam(idx, 'startTime', e.target.value)}
+                                                                className="rounded-2"
+                                                            />
+                                                            <Form.Control
+                                                                size="sm"
+                                                                placeholder="End"
+                                                                value={ex.endTime}
+                                                                onChange={(e) => handleUpdateExam(idx, 'endTime', e.target.value)}
+                                                                className="rounded-2"
+                                                            />
+                                                        </div>
+                                                    </td>
+                                                    <td>
+                                                        <Form.Control
+                                                            size="sm"
+                                                            placeholder="e.g. Room 102"
+                                                            value={ex.room}
+                                                            onChange={(e) => handleUpdateExam(idx, 'room', e.target.value)}
+                                                            className="rounded-2"
+                                                        />
+                                                    </td>
+                                                    <td className="text-center">
+                                                        <Button
+                                                            variant="outline-danger"
+                                                            size="sm"
+                                                            className="rounded-circle border-0 p-1"
+                                                            onClick={() => handleRemoveExam(idx)}
+                                                        >
+                                                            <i className="bi bi-trash-fill"></i>
+                                                        </Button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                            {datesheet.exams.length === 0 && (
+                                                <tr>
+                                                    <td colSpan="5" className="text-center py-5 text-muted">
+                                                        No subjects added yet. Click "Add Subject" to begin.
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </tbody>
+                                    </Table>
+                                </Card.Body>
+                            </Card>
+                        )}
                     </Col>
                 </Row>
             </Container>

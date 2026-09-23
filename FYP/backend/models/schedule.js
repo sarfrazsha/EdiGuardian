@@ -11,8 +11,11 @@ const ScheduleSchema = new schema({
         day: String,
         periods: [{
             time: String,
+            startTime: String,
+            endTime: String,
             subject: String,
-            teacher: String
+            teacher: String,
+            teacherEmail: String
         }]
     }]
 }, { timestamps: true });

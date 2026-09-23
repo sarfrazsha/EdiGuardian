@@ -15,7 +15,6 @@ import ManageStudents from './pages/ManageStudents';
 import ManageTeachers from './pages/ManageTeachers';
 import Homework from './pages/Homework';
 import MyFees from './pages/MyFees';
-import PaymentSuccess from './pages/PaymentSuccess';
 import ManageResults from './pages/ManageResults';
 import Attendance from './pages/Attendance';
 import Schedule from './pages/Schedule';
@@ -50,7 +49,6 @@ function App() {
         <Route path="/parent-hub" element={<ParentHub />} />
         <Route path="/parent-student-details" element={<ParentStudentDetails />} />
         <Route path="/my-fees" element={<MyFees />} />
-        <Route path="/payment-success" element={<PaymentSuccess />} />
         <Route path="/manage-results" element={<ManageResults />} />
         <Route path="/help" element={<Help />} />
         <Route path="/contact" element={<Contact />} />

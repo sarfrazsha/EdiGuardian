@@ -43,6 +43,19 @@ const Fee = new schema(
             type: String,
             enum: ['Pending', 'Review', 'Paid'],
             default: 'Pending'
+        },
+        overdueNotifiedAt: {
+            type: Date,
+            default: null
+        },
+        // When this fee's status actually became 'Paid' - distinct from
+        // `month`/`year`, which name the billing period the voucher is FOR,
+        // not when it was settled. "Total fee collected in September" means
+        // payments that landed in September, which may be for a different
+        // month's voucher paid late (or early).
+        paidAt: {
+            type: Date,
+            default: null
         }
     },
     { timestamps: true }

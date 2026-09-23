@@ -12,7 +12,22 @@ const Homework = () => {
     const userEmail = localStorage.getItem('userEmail');
     const cNo = localStorage.getItem('classNo');
     const selectedChildClass = localStorage.getItem('selectedChildClass');
-    const userClass = (role === 'parent' && selectedChildClass) ? selectedChildClass : (cNo || localStorage.getItem('teacherClass'));
+
+    // Multi-class support for teachers
+    const rawTeacherClasses = localStorage.getItem('teacherClasses');
+    const teacherClasses = (() => {
+        try { return JSON.parse(rawTeacherClasses) || []; } catch { return []; }
+    })();
+    const teacherClassSingle = localStorage.getItem('teacherClass');
+    const allTeacherClasses = teacherClasses.length > 0
+        ? [...new Set(teacherClasses)]
+        : (teacherClassSingle ? [teacherClassSingle] : []);
+
+    const userClass = (role === 'parent' && selectedChildClass)
+        ? selectedChildClass
+        : (cNo || (allTeacherClasses.length > 0 ? allTeacherClasses[0] : null));
+
+    const [selectedAssignClass, setSelectedAssignClass] = useState(allTeacherClasses[0] || userClass || '');
 
     const [homeworks, setHomeworks] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -41,11 +56,26 @@ const Homework = () => {
     };
 
     const fetchHomework = async () => {
-        if (!userClass) return;
         setLoading(true);
         try {
-            const res = await Axios.get(`/api/homework/class/${userClass}`);
-            setHomeworks(res.data);
+            if (role === 'teacher' && allTeacherClasses.length > 1) {
+                // Fetch homework from all assigned classes and merge
+                const results = await Promise.all(
+                    allTeacherClasses.map(cls => Axios.get(`/api/homework/class/${cls}`))
+                );
+                const merged = results.flatMap(r => r.data);
+                // Deduplicate by _id
+                const seen = new Set();
+                const unique = merged.filter(hw => {
+                    if (seen.has(hw._id)) return false;
+                    seen.add(hw._id);
+                    return true;
+                });
+                setHomeworks(unique);
+            } else if (userClass) {
+                const res = await Axios.get(`/api/homework/class/${userClass}`);
+                setHomeworks(res.data);
+            }
         } catch (err) {
             console.error("Error fetching homework:", err);
         } finally {
@@ -120,7 +150,7 @@ const Homework = () => {
         formData.append('subject', newHomework.subject);
         formData.append('dueDate', newHomework.dueDate);
         formData.append('description', newHomework.description);
-        formData.append('classNo', userClass);
+        formData.append('classNo', role === 'teacher' ? selectedAssignClass : userClass);
         formData.append('assignedBy', userEmail);
         if (newHomework.file) {
             formData.append('file', newHomework.file);
@@ -159,7 +189,7 @@ const Homework = () => {
             <Container fluid className="py-4">
                 <div className="d-flex justify-content-between align-items-center mb-4">
                     <div className="d-flex align-items-center gap-3">
-                        <div className="d-flex gap-2">
+                        <div>
                             <Button
                                 variant="light"
                                 className="rounded-circle shadow-sm border p-0 d-flex align-items-center justify-content-center"
@@ -168,15 +198,6 @@ const Homework = () => {
                                 title="Go Back"
                             >
                                 <i className="bi bi-arrow-left fs-5"></i>
-                            </Button>
-                            <Button
-                                variant="light"
-                                className="rounded-circle shadow-sm border p-0 d-flex align-items-center justify-content-center"
-                                style={{ width: '40px', height: '40px' }}
-                                onClick={() => navigate(1)}
-                                title="Go Forward"
-                            >
-                                <i className="bi bi-arrow-right fs-5"></i>
                             </Button>
                         </div>
                         <div>
@@ -348,6 +369,19 @@ const Homework = () => {
                                     onChange={(e) => setNewHomework({ ...newHomework, title: e.target.value })}
                                 />
                             </Form.Group>
+                            {role === 'teacher' && allTeacherClasses.length > 1 && !isEditing && (
+                                <Form.Group className="mb-3">
+                                    <Form.Label className="small fw-bold">Assign to Class</Form.Label>
+                                    <Form.Select
+                                        value={selectedAssignClass}
+                                        onChange={(e) => setSelectedAssignClass(e.target.value)}
+                                    >
+                                        {allTeacherClasses.map(cls => (
+                                            <option key={cls} value={cls}>{cls}</option>
+                                        ))}
+                                    </Form.Select>
+                                </Form.Group>
+                            )}
                             <Row>
                                 <Col md={6}>
                                     <Form.Group className="mb-3">

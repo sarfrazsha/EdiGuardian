@@ -30,7 +30,16 @@ const Teacher = new schema(
         },
         teacherProfile:{
             type:String
-        }
+        },
+        subject:{
+            type: String,
+            required: true,
+            trim: true
+        },
+        subjects:[{
+            type: String,
+            trim: true
+        }]
        
     
     }

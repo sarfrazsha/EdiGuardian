@@ -23,7 +23,7 @@ const ChildSelector = ({ children, selectedChildId, onChildSelect }) => {
     }
 
     return (
-        <Card className="border-0 shadow-sm rounded-4 mb-4" style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white' }}>
+        <Card className="border-0 shadow-sm rounded-4 mb-4" style={{ background: 'linear-gradient(135deg, rgb(125, 78, 84) 0%, rgb(160, 125, 130) 100%)', color: 'white' }}>
             <Card.Body className="p-3">
                 <div className="d-flex align-items-center justify-content-between">
                     <div className="d-flex align-items-center gap-3">
@@ -59,7 +59,7 @@ const ChildSelector = ({ children, selectedChildId, onChildSelect }) => {
                             <i className="bi bi-chevron-down"></i>
                         </Dropdown.Toggle>
 
-                        <Dropdown.Menu className="shadow-lg border-0 rounded-3" style={{ minWidth: '280px' }}>
+                        <Dropdown.Menu className="shadow-lg border-0 rounded-3" style={{ width: 'min(280px, calc(100vw - 2rem))', minWidth: '0', maxWidth: 'calc(100vw - 2rem)' }}>
                             {children.map((child) => (
                                 <Dropdown.Item
                                     key={child.id}
