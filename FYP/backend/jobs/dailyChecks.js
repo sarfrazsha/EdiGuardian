@@ -1,7 +1,7 @@
 const cron = require('node-cron');
 const Fee = require('../models/fee');
 const HomeworkSubmission = require('../models/homework_submission');
-const { notifyFeeOverdue, notifyHomeworkLate } = require('../services/notifications');
+const { notifyFeeOverdue, notifyFeeDueTomorrow, notifyHomeworkLate } = require('../services/notifications');
 
 // Fee vouchers whose dueDate has passed and are still unpaid, and that have not
 // already been emailed. Sent once per voucher, not repeated every day.
@@ -30,6 +30,52 @@ async function checkOverdueFees() {
         }
     }
     return { checked: fees.length, sent };
+}
+
+// dueDate is stored as a "YYYY-MM-DD" string. `new Date("YYYY-MM-DD")` is UTC
+// midnight, so parse it as a local calendar date to compare whole days.
+function parseLocalDate(value) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value || ''));
+    if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return null;
+    d.setHours(0, 0, 0, 0);
+    return d;
+}
+
+// Unpaid vouchers due tomorrow get a one-time reminder. Vouchers due today are
+// included too, so a reminder isn't lost if the job didn't run yesterday
+// (server down) or the voucher was issued with a due date of tomorrow after
+// today's run.
+async function checkFeesDueTomorrow() {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const startOfTomorrow = new Date(startOfToday);
+    startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
+
+    const fees = await Fee.find({
+        status: 'Pending',
+        dueReminderSentAt: null
+    }).lean();
+
+    const dueSoon = fees.filter(f => {
+        const due = parseLocalDate(f.dueDate);
+        return due && due >= startOfToday && due <= startOfTomorrow;
+    });
+
+    let sent = 0;
+    for (const fee of dueSoon) {
+        try {
+            const result = await notifyFeeDueTomorrow(fee);
+            if (result && result.sent) {
+                await Fee.updateOne({ _id: fee._id }, { $set: { dueReminderSentAt: new Date() } });
+                sent++;
+            }
+        } catch (err) {
+            console.error(`[dailyChecks] Failed to send due reminder for fee ${fee._id}:`, err.message);
+        }
+    }
+    return { checked: dueSoon.length, sent };
 }
 
 // Homework submissions still Pending after the homework's dueDate has passed,
@@ -65,8 +111,12 @@ async function checkLateHomework() {
 }
 
 async function runDailyChecks() {
-    console.log('[dailyChecks] Running overdue fee / late homework scan...');
-    const [fees, homework] = await Promise.all([
+    console.log('[dailyChecks] Running fee reminder / overdue fee / late homework scan...');
+    const [dueReminders, fees, homework] = await Promise.all([
+        checkFeesDueTomorrow().catch(err => {
+            console.error('[dailyChecks] Fee due-reminder check failed:', err.message);
+            return { checked: 0, sent: 0, error: err.message };
+        }),
         checkOverdueFees().catch(err => {
             console.error('[dailyChecks] Fee check failed:', err.message);
             return { checked: 0, sent: 0, error: err.message };
@@ -76,8 +126,8 @@ async function runDailyChecks() {
             return { checked: 0, sent: 0, error: err.message };
         })
     ]);
-    console.log(`[dailyChecks] Fees: ${fees.sent}/${fees.checked} notified. Homework: ${homework.sent}/${homework.checked} notified.`);
-    return { fees, homework };
+    console.log(`[dailyChecks] Due reminders: ${dueReminders.sent}/${dueReminders.checked} sent. Overdue fees: ${fees.sent}/${fees.checked} notified. Homework: ${homework.sent}/${homework.checked} notified.`);
+    return { dueReminders, fees, homework };
 }
 
 // Runs once a day. Also exported standalone so an admin route can trigger it

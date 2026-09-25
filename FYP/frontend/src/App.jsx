@@ -21,6 +21,8 @@ import Schedule from './pages/Schedule';
 import DateSheet from './pages/DateSheet';
 import AttendanceHistory from './pages/AttendanceHistory';
 import IssueFees from './pages/IssueFees';
+import FeeStructure from './pages/FeeStructure';
+import ProgressReport from './pages/ProgressReport';
 import AllFees from './pages/AllFees';
 import ParentHub from './pages/ParentHub';
 import ParentStudentDetails from './pages/ParentStudentDetails';
@@ -44,11 +46,13 @@ function App() {
         <Route path="/manage-students" element={<ManageStudents />} />
         <Route path="/manage-teachers" element={<ManageTeachers />} />
         <Route path="/homework" element={<Homework />} />
+        <Route path="/fee-structure" element={<FeeStructure />} />
         <Route path="/issue-fees" element={<IssueFees />} />
         <Route path="/all-fees" element={<AllFees />} />
         <Route path="/parent-hub" element={<ParentHub />} />
         <Route path="/parent-student-details" element={<ParentStudentDetails />} />
         <Route path="/my-fees" element={<MyFees />} />
+        <Route path="/progress-report" element={<ProgressReport />} />
         <Route path="/manage-results" element={<ManageResults />} />
         <Route path="/help" element={<Help />} />
         <Route path="/contact" element={<Contact />} />

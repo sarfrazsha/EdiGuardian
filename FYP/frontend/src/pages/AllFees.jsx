@@ -23,7 +23,7 @@ const AllFees = () => {
     const [showViewModal, setShowViewModal] = useState(false);
     const [selectedVoucher, setSelectedVoucher] = useState(null);
 
-    // Online (mock) payment requests
+    // Online payments
     const [activeTab, setActiveTab] = useState(searchParams.get('tab') === 'payments' ? 'payments' : 'fees');
     const [payments, setPayments] = useState([]);
     const [paymentsLoading, setPaymentsLoading] = useState(false);
@@ -108,9 +108,20 @@ const AllFees = () => {
     };
 
     const paymentBadge = (status) => {
-        const color = status === 'Approved' ? 'success' : status === 'Rejected' ? 'danger' : 'warning';
-        return <Badge bg={color} className={`bg-opacity-10 text-${color} px-3 py-2 rounded-pill`}>{status}</Badge>;
+        const map = {
+            Successful: ['info', 'Under Review'],
+            Approved: ['success', 'Approved'],
+            Failed: ['danger', 'Failed'],
+            Rejected: ['danger', 'Rejected'],
+            Pending: ['warning', 'Awaiting Approval']
+        };
+        const [color, label] = map[status] || ['secondary', status];
+        return <Badge bg={color} className={`bg-opacity-10 text-${color} px-3 py-2 rounded-pill`}>{label}</Badge>;
     };
+
+    // Online payments waiting for the admin's verification.
+    const isReviewable = (p) => p.status === 'Successful' || p.status === 'Pending';
+    const reviewablePaymentFor = (feeId) => payments.find(p => p.voucher?._id === feeId && isReviewable(p));
 
     const months = [
         "January", "February", "March", "April", "May", "June",
@@ -195,7 +206,9 @@ const AllFees = () => {
                                         <Form.Label className="small fw-bold text-secondary">Payment Status</Form.Label>
                                         <Form.Select className="bg-light border-0" value={payStatus} onChange={(e) => setPayStatus(e.target.value)}>
                                             <option value="">All Statuses</option>
-                                            <option value="Pending">Pending</option>
+                                            <option value="Successful">Under Review</option>
+                                            <option value="Failed">Failed</option>
+                                            <option value="Pending">Awaiting Approval</option>
                                             <option value="Approved">Approved</option>
                                             <option value="Rejected">Rejected</option>
                                         </Form.Select>
@@ -220,7 +233,7 @@ const AllFees = () => {
                                                 <th>Voucher</th>
                                                 <th>Amount</th>
                                                 <th>Method</th>
-                                                <th>Submitted</th>
+                                                <th>Date</th>
                                                 <th className="text-center">Status</th>
                                                 <th className="text-center">Actions</th>
                                             </tr>
@@ -237,12 +250,18 @@ const AllFees = () => {
                                                     </td>
                                                     <td className="small">{p.voucher ? `${p.voucher.month} ${p.voucher.year}` : '—'}</td>
                                                     <td className="fw-bold text-primary">Rs {p.amount.toLocaleString()}</td>
-                                                    <td className="small">{p.paymentMethod}</td>
+                                                    <td className="small">
+                                                        {p.paymentMethod}
+                                                        {p.accountLast4 && <div className="text-muted">•••• {p.accountLast4}</div>}
+                                                    </td>
                                                     <td className="small">{new Date(p.createdAt).toLocaleString()}</td>
-                                                    <td className="text-center">{paymentBadge(p.status)}</td>
                                                     <td className="text-center">
-                                                        <Button size="sm" variant={p.status === 'Pending' ? 'primary' : 'outline-primary'} className="rounded-pill px-3" onClick={() => openPayment(p)}>
-                                                            {p.status === 'Pending' ? 'Review' : 'View'}
+                                                        {paymentBadge(p.status)}
+                                                        {p.failureReason && <div className="small text-danger mt-1" style={{ maxWidth: '200px', margin: '0 auto' }}>{p.failureReason}</div>}
+                                                    </td>
+                                                    <td className="text-center">
+                                                        <Button size="sm" variant={isReviewable(p) ? 'primary' : 'outline-primary'} className="rounded-pill px-3" onClick={() => openPayment(p)}>
+                                                            {isReviewable(p) ? 'Review' : 'View'}
                                                         </Button>
                                                     </td>
                                                 </tr>
@@ -330,19 +349,40 @@ const AllFees = () => {
                                                 <div className="fw-bold text-dark">{f.studentName}</div>
                                                 <div className="small text-muted">{f.parentEmail}</div>
                                             </td>
-                                            <td className="fw-bold text-primary">Rs {f.amount.toLocaleString()}</td>
+                                            <td>
+                                                <span className="fw-bold text-primary">Rs {f.amount.toLocaleString()}</span>
+                                                {f.discountAmount > 0 && (
+                                                    <div className="small text-success">{f.discountPercent}% off Rs {f.originalAmount.toLocaleString()}</div>
+                                                )}
+                                                {f.fineAmount > 0 && (
+                                                    <div className="small text-danger" title={f.fineReason}>+ Rs {f.fineAmount.toLocaleString()} fine{f.fineReason ? ` (${f.fineReason})` : ''}</div>
+                                                )}
+                                            </td>
                                             <td className="small">{new Date(f.dueDate).toLocaleDateString()}</td>
                                             <td className="text-center">
                                                 {f.status === 'Paid' && <Badge bg="success" className="bg-opacity-10 text-success px-3 py-2 rounded-pill">Paid</Badge>}
                                                 {f.status === 'Pending' && <Badge bg="warning" className="bg-opacity-10 text-warning px-3 py-2 rounded-pill">Pending</Badge>}
                                                 {f.status === 'Review' && <Badge bg="info" className="bg-opacity-10 text-info px-3 py-2 rounded-pill">Under Review</Badge>}
+                                                {f.status === 'Review' && reviewablePaymentFor(f._id) && (
+                                                    <div className="small text-muted mt-1"><i className="bi bi-globe me-1"></i>Online · {reviewablePaymentFor(f._id).paymentMethod}</div>
+                                                )}
                                             </td>
                                             <td className="text-center">
                                                 <div className="d-flex align-items-center justify-content-center gap-2">
+                                                    {!f.adminVoucher && (
+                                                        <Button size="sm" variant="outline-secondary" className="rounded-pill p-1 px-2" href={`/api/fees/${f._id}/voucher`} target="_blank" rel="noopener noreferrer" title="View / Print Fee Voucher">
+                                                            <i className="bi bi-printer"></i>
+                                                        </Button>
+                                                    )}
                                                     {f.status === 'Review' && (
                                                         <>
                                                             {f.parentReceipt && (
                                                                 <Button size="sm" variant="outline-primary" className="rounded-pill p-1 px-2" onClick={() => handleViewVoucher(f.parentReceipt)} title="View Voucher">
+                                                                    <i className="bi bi-eye-fill"></i>
+                                                                </Button>
+                                                            )}
+                                                            {!f.parentReceipt && reviewablePaymentFor(f._id) && (
+                                                                <Button size="sm" variant="outline-primary" className="rounded-pill p-1 px-2" onClick={() => openPayment(reviewablePaymentFor(f._id))} title="View Online Payment">
                                                                     <i className="bi bi-eye-fill"></i>
                                                                 </Button>
                                                             )}
@@ -390,7 +430,8 @@ const AllFees = () => {
                                     ['Voucher Amount', selectedPayment.voucher ? `Rs ${selectedPayment.voucher.amount.toLocaleString()}` : '—'],
                                     ['Paid Amount', `Rs ${selectedPayment.amount.toLocaleString()}`],
                                     ['Method', `${selectedPayment.paymentMethod}${selectedPayment.accountLast4 ? ` (•••• ${selectedPayment.accountLast4})` : ''}`],
-                                    ['Submitted', new Date(selectedPayment.createdAt).toLocaleString()],
+                                    ['Account Holder', selectedPayment.accountHolder || '—'],
+                                    ['Date', new Date(selectedPayment.createdAt).toLocaleString()],
                                     ['Voucher Status', selectedPayment.voucher?.status === 'Pending' ? 'Unpaid' : selectedPayment.voucher?.status],
                                 ].map(([label, value]) => (
                                     <div key={label} className="d-flex justify-content-between mb-1 gap-3">
@@ -404,21 +445,33 @@ const AllFees = () => {
                                 </div>
                             </div>
 
+                            {selectedPayment.status === 'Successful' && (
+                                <p className="small text-info mb-3">
+                                    <i className="bi bi-hourglass-split me-2"></i>
+                                    Paid online on {new Date(selectedPayment.createdAt).toLocaleString()}. Approve to mark the voucher Paid, or reject if the payment can't be verified.
+                                </p>
+                            )}
+                            {selectedPayment.status === 'Failed' && (
+                                <p className="small text-danger mb-0">
+                                    <i className="bi bi-x-circle-fill me-2"></i>
+                                    Payment failed: {selectedPayment.failureReason}
+                                </p>
+                            )}
                             {selectedPayment.status === 'Approved' && (
                                 <p className="small text-success mb-0">
                                     <i className="bi bi-check-circle-fill me-2"></i>
-                                    Approved by {selectedPayment.approvedBy} on {new Date(selectedPayment.approvedAt).toLocaleString()}
+                                    Approved by {selectedPayment.approvedBy || "admin"} on {new Date(selectedPayment.approvedAt).toLocaleString()}
                                 </p>
                             )}
                             {selectedPayment.status === 'Rejected' && (
                                 <div className="small text-danger">
                                     <i className="bi bi-x-circle-fill me-2"></i>
-                                    Rejected by {selectedPayment.rejectedBy} on {new Date(selectedPayment.rejectedAt).toLocaleString()}
+                                    Rejected by {selectedPayment.rejectedBy || "admin"} on {new Date(selectedPayment.rejectedAt).toLocaleString()}
                                     {selectedPayment.rejectionReason && <div className="mt-1">Reason: {selectedPayment.rejectionReason}</div>}
                                 </div>
                             )}
 
-                            {selectedPayment.status === 'Pending' && (
+                            {isReviewable(selectedPayment) && (
                                 <>
                                     <Form.Group className="mb-3">
                                         <Form.Label className="small fw-bold">Rejection Reason (optional)</Form.Label>

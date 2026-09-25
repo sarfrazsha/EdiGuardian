@@ -15,7 +15,14 @@ const AttendanceHistory = () => {
     const sid = localStorage.getItem('studentId');
     const selectedChild = localStorage.getItem('selectedChildId');
     const studentId = (role === 'parent' && selectedChild) ? selectedChild : sid;
-    const studentName = localStorage.getItem('userName') || 'Student';
+    const child = (() => {
+        if (role !== 'parent') return null;
+        try { return JSON.parse(localStorage.getItem('parentChildren') || '[]').find(c => c.id === selectedChild) || null; } catch { return null; }
+    })();
+    const studentName = child?.name || localStorage.getItem('userName') || 'Student';
+    const studentClass = role === 'parent'
+        ? (child?.classNo || localStorage.getItem('selectedChildClass'))
+        : localStorage.getItem('classNo');
 
     useEffect(() => {
         if (!studentId) {
@@ -44,11 +51,9 @@ const AttendanceHistory = () => {
     });
 
     const formatISODate = (dateStr) => {
-        try {
-            return new Date(dateStr).toISOString().split('T')[0];
-        } catch {
-            return String(dateStr).split('T')[0];
-        }
+        const d = new Date(dateStr);
+        if (Number.isNaN(d.getTime())) return String(dateStr).split('T')[0];
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     };
 
     // Extract unique subjects
@@ -69,10 +74,19 @@ const AttendanceHistory = () => {
         return { total, present, absent, pct };
     }, [records]);
 
+    // Records matching the subject + date filters (used by every view)
+    const filteredRecords = useMemo(() => {
+        return records.filter(r => {
+            const matchesSubject = selectedSubject === 'ALL' || (r.subject || '').toLowerCase() === selectedSubject.toLowerCase();
+            const matchesDate = !searchDate || formatISODate(r.date) === searchDate;
+            return matchesSubject && matchesDate;
+        });
+    }, [records, selectedSubject, searchDate]);
+
     // Subject breakdown analytics
     const subjectAnalytics = useMemo(() => {
         const map = {};
-        records.forEach(r => {
+        filteredRecords.forEach(r => {
             const sub = r.subject || 'General';
             if (!map[sub]) {
                 map[sub] = { total: 0, present: 0, absent: 0 };
@@ -89,7 +103,7 @@ const AttendanceHistory = () => {
             absent: data.absent,
             pct: data.total > 0 ? Math.round((data.present / data.total) * 100) : 0
         })).sort((a, b) => b.total - a.total);
-    }, [records]);
+    }, [filteredRecords]);
 
     // Group records by calendar day (for daily all-subjects view)
     const dailyGroups = useMemo(() => {
@@ -112,7 +126,7 @@ const AttendanceHistory = () => {
 
         // Filter by date if searchDate is applied
         if (searchDate) {
-            arr = arr.filter(g => g.isoDate.includes(searchDate));
+            arr = arr.filter(g => g.isoDate === searchDate);
         }
 
         // Filter by subject if selected
@@ -126,22 +140,17 @@ const AttendanceHistory = () => {
         return arr;
     }, [records, searchDate, selectedSubject]);
 
-    // Filtered records for table view
-    const filteredRecords = useMemo(() => {
-        return records.filter(r => {
-            const matchesSubject = selectedSubject === 'ALL' || (r.subject || '').toLowerCase() === selectedSubject.toLowerCase();
-            const matchesDate = !searchDate || formatISODate(r.date).includes(searchDate);
-            return matchesSubject && matchesDate;
-        });
-    }, [records, selectedSubject, searchDate]);
 
     const getSubjectIcon = (subName = '') => {
         const lower = subName.toLowerCase();
         if (lower.includes('math')) return 'bi-calculator';
-        if (lower.includes('sci') || lower.includes('chem') || lower.includes('phy') || lower.includes('bio')) return 'bi-flask';
+        if (lower.includes('comp') || /\bit\b|ict/.test(lower)) return 'bi-laptop';
+        if (lower.includes('chem')) return 'bi-droplet-half';
+        if (lower.includes('phy')) return 'bi-lightning-charge';
+        if (lower.includes('bio')) return 'bi-flower1';
+        if (lower.includes('sci')) return 'bi-lightbulb';
         if (lower.includes('eng')) return 'bi-translate';
         if (lower.includes('urdu') || lower.includes('isl')) return 'bi-book';
-        if (lower.includes('comp') || lower.includes('it')) return 'bi-laptop';
         if (lower.includes('his') || lower.includes('geo') || lower.includes('pst')) return 'bi-globe-americas';
         return 'bi-journal-check';
     };
@@ -162,14 +171,19 @@ const AttendanceHistory = () => {
                         </Button>
                         <div>
                             <h2 className="fw-bold mb-0 text-dark">Subject-Wise Attendance History</h2>
-                            <p className="text-muted small mb-0">
-                                {role === 'parent' ? `Daily subject attendance breakdown for ${studentName}` : 'View your daily attendance across all scheduled subjects'}
+                            <p className="text-muted small mb-0 d-flex flex-wrap align-items-center gap-2">
+                                <span>{role === 'parent' ? `Daily subject attendance for ${studentName}` : `Daily attendance for ${studentName}`}</span>
+                                {studentClass && (
+                                    <span className="badge rounded-pill fw-semibold px-3 py-1" style={{ background: '#F3ECEA', color: '#7A5358' }}>
+                                        <i className="bi bi-mortarboard me-1"></i>Class {studentClass}
+                                    </span>
+                                )}
                             </p>
                         </div>
                     </div>
 
                     {/* Quick navigation pill tabs */}
-                    <Nav variant="pills" className="bg-light p-1 rounded-pill shadow-sm">
+                    <Nav variant="pills" className="bg-light p-1 rounded-pill shadow-sm results-term-tabs">
                         <Nav.Item>
                             <Nav.Link
                                 active={viewMode === 'daily'}
@@ -323,9 +337,11 @@ const AttendanceHistory = () => {
                                                     </div>
 
                                                     <div className="d-flex align-items-center gap-2">
-                                                        <Badge bg={isAllPresent ? 'success' : isAllAbsent ? 'danger' : 'warning'} className="px-3 py-2 rounded-pill fw-bold">
+                                                        <span className="px-3 py-2 rounded-pill fw-bold small"
+                                                            style={isAllPresent ? { background: '#E8F6EE', color: '#1E9E5A' } : isAllAbsent ? { background: '#FDEEEA', color: '#C4472B' } : { background: '#FDF4E3', color: '#B7791F' }}>
+                                                            <i className={`bi ${isAllPresent ? 'bi-check-circle-fill' : isAllAbsent ? 'bi-x-circle-fill' : 'bi-exclamation-circle-fill'} me-1`}></i>
                                                             {isAllPresent ? 'Full Day Present' : isAllAbsent ? 'Absent All Day' : 'Partial Attendance'}
-                                                        </Badge>
+                                                        </span>
                                                         <Badge bg="light" text="dark" className="border px-3 py-2 rounded-pill fw-semibold">
                                                             {presentPeriods} / {totalPeriods} Subjects Attended ({dayPercentage}%)
                                                         </Badge>
@@ -337,29 +353,28 @@ const AttendanceHistory = () => {
                                                         {group.records.map((rec, idx) => {
                                                             const isPresent = rec.status === 'Present';
                                                             return (
-                                                                <Col key={idx} xs={12} sm={6} lg={4}>
-                                                                    <div className={`p-3 rounded-4 bg-white border shadow-sm d-flex align-items-center justify-content-between ${isPresent ? 'border-success border-opacity-50' : 'border-danger border-opacity-50'}`}>
-                                                                        <div className="d-flex align-items-center gap-3">
-                                                                            <div className={`rounded-3 p-2 text-white d-flex align-items-center justify-content-center ${isPresent ? 'bg-success' : 'bg-danger'}`} style={{ width: '36px', height: '36px' }}>
-                                                                                <i className={`bi ${getSubjectIcon(rec.subject)}`}></i>
+                                                                <Col key={idx} xs={12} sm={6} xl={4}>
+                                                                    <div className="h-100 p-3 rounded-4 bg-white shadow-sm d-flex flex-column"
+                                                                        style={{ border: `1px solid ${isPresent ? '#BFE5CE' : '#F2C4B8'}`, borderLeft: `4px solid ${isPresent ? '#1E9E5A' : '#C4472B'}` }}>
+                                                                        {/* Row 1: icon + status */}
+                                                                        <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
+                                                                            <div className="rounded-3 d-flex align-items-center justify-content-center flex-shrink-0"
+                                                                                style={{ width: 40, height: 40, background: isPresent ? '#E8F6EE' : '#FDEEEA', color: isPresent ? '#1E9E5A' : '#C4472B' }}>
+                                                                                <i className={`bi ${getSubjectIcon(rec.subject)} fs-5`}></i>
                                                                             </div>
-                                                                            <div>
-                                                                                <div className="fw-bold text-dark">{rec.subject || 'Period'}</div>
-                                                                                {rec.markedBy && (
-                                                                                    <div className="small text-muted" style={{ fontSize: '0.75rem' }}>
-                                                                                        <i className="bi bi-person-check me-1"></i>{rec.markedBy.split('@')[0]}
-                                                                                    </div>
-                                                                                )}
-                                                                            </div>
+                                                                            <span className="rounded-pill px-3 py-1 fw-semibold small text-nowrap"
+                                                                                style={{ background: isPresent ? '#E8F6EE' : '#FDEEEA', color: isPresent ? '#1E9E5A' : '#C4472B' }}>
+                                                                                <i className={`bi ${isPresent ? 'bi-check-circle-fill' : 'bi-x-circle-fill'} me-1`}></i>{rec.status}
+                                                                            </span>
                                                                         </div>
-
-                                                                        <Badge
-                                                                            bg={isPresent ? 'success' : 'danger'}
-                                                                            className="px-3 py-2 rounded-pill fw-semibold"
-                                                                        >
-                                                                            <i className={`bi ${isPresent ? 'bi-check-circle-fill' : 'bi-x-circle-fill'} me-1`}></i>
-                                                                            {rec.status}
-                                                                        </Badge>
+                                                                        {/* Row 2: subject */}
+                                                                        <div className="fw-bold text-dark" style={{ wordBreak: 'normal', overflowWrap: 'normal' }}>{rec.subject || 'Period'}</div>
+                                                                        {/* Row 3: teacher (one line, truncated) */}
+                                                                        {rec.markedBy && (
+                                                                            <div className="small text-muted text-truncate mt-1" title={rec.markedBy}>
+                                                                                <i className="bi bi-person-check me-1"></i>Marked by {rec.markedBy.split('@')[0]}
+                                                                            </div>
+                                                                        )}
                                                                     </div>
                                                                 </Col>
                                                             );
@@ -376,43 +391,70 @@ const AttendanceHistory = () => {
                         {/* MODE 2: SUBJECT-WISE ANALYTICS VIEW */}
                         {viewMode === 'subjects' && (
                             <Row className="g-3">
-                                {subjectAnalytics.map(sub => (
-                                    <Col key={sub.subject} md={6} lg={4}>
+                                {subjectAnalytics.length === 0 && (
+                                    <Col xs={12}>
+                                        <Card className="border-0 shadow-sm rounded-4 text-center py-5 text-muted">
+                                            <Card.Body>
+                                                <i className="bi bi-search fs-1 d-block mb-2 opacity-50"></i>
+                                                <h6 className="fw-bold">No attendance records match the selected filter.</h6>
+                                                <p className="small mb-0">Try clearing the date or subject filter.</p>
+                                            </Card.Body>
+                                        </Card>
+                                    </Col>
+                                )}
+                                {subjectAnalytics.map(sub => {
+                                    const tone = sub.pct >= 75
+                                        ? { color: '#1E9E5A', bg: '#E8F6EE', label: 'Safe Standing', icon: 'bi-shield-check' }
+                                        : sub.pct >= 50
+                                            ? { color: '#B7791F', bg: '#FDF4E3', label: 'At Risk', icon: 'bi-exclamation-triangle' }
+                                            : { color: '#C4472B', bg: '#FDEEEA', label: 'Low Attendance', icon: 'bi-exclamation-octagon' };
+                                    return (
+                                    <Col key={sub.subject} md={6} xl={4}>
                                         <Card className="border-0 shadow-sm rounded-4 h-100">
-                                            <Card.Body className="p-4">
-                                                <div className="d-flex align-items-center justify-content-between mb-3">
-                                                    <div className="d-flex align-items-center gap-3">
-                                                        <div className="bg-primary bg-opacity-10 p-3 rounded-4 text-primary">
-                                                            <i className={`bi ${getSubjectIcon(sub.subject)} fs-4`}></i>
-                                                        </div>
-                                                        <div>
-                                                            <h5 className="fw-bold text-dark mb-0">{sub.subject}</h5>
-                                                            <span className="text-muted small">{sub.total} Scheduled Period{sub.total !== 1 ? 's' : ''}</span>
-                                                        </div>
+                                            <Card.Body className="p-4 d-flex flex-column">
+                                                {/* Row 1: icon + status */}
+                                                <div className="d-flex align-items-center justify-content-between gap-2 mb-3">
+                                                    <div className="rounded-4 d-flex align-items-center justify-content-center flex-shrink-0" style={{ width: 48, height: 48, background: '#F3ECEA', color: '#91696E' }}>
+                                                        <i className={`bi ${getSubjectIcon(sub.subject)} fs-4`}></i>
                                                     </div>
-                                                    <h3 className={`fw-bold mb-0 ${sub.pct >= 75 ? 'text-success' : 'text-danger'}`}>
-                                                        {sub.pct}%
-                                                    </h3>
+                                                    <span className="rounded-pill px-3 py-1 fw-semibold text-nowrap small" style={{ background: tone.bg, color: tone.color }}>
+                                                        <i className={`bi ${tone.icon} me-1`}></i>{tone.label}
+                                                    </span>
                                                 </div>
 
-                                                <ProgressBar
-                                                    now={sub.pct}
-                                                    variant={sub.pct >= 75 ? 'success' : sub.pct >= 50 ? 'warning' : 'danger'}
-                                                    className="rounded-pill mb-3"
-                                                    style={{ height: '8px' }}
-                                                />
+                                                {/* Row 2: subject name (full width, never broken mid-word) */}
+                                                <h5 className="fw-bold text-dark mb-1 lh-sm" style={{ wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none' }}>{sub.subject}</h5>
+                                                <div className="text-muted small mb-3">{sub.total} scheduled period{sub.total !== 1 ? 's' : ''}</div>
 
-                                                <div className="d-flex justify-content-between small text-muted pt-2 border-top">
-                                                    <span><i className="bi bi-check-circle text-success me-1"></i>Present: <strong>{sub.present}</strong></span>
-                                                    <span><i className="bi bi-x-circle text-danger me-1"></i>Absent: <strong>{sub.absent}</strong></span>
-                                                    <Badge bg={sub.pct >= 75 ? 'success' : 'danger'} className="rounded-pill px-2 py-1">
-                                                        {sub.pct >= 75 ? 'Safe Standing' : 'Low Attendance'}
-                                                    </Badge>
+                                                {/* Row 3: percentage + bar */}
+                                                <div className="d-flex align-items-baseline justify-content-between gap-2 mb-2">
+                                                    <span className="fw-bold text-dark lh-1" style={{ fontSize: '2rem' }}>{sub.pct}%</span>
+                                                    <span className="small text-muted text-nowrap">{sub.present} of {sub.total} attended</span>
+                                                </div>
+                                                <div className="rounded-pill mb-4" style={{ height: 8, background: '#EEE8E3' }}>
+                                                    <div className="rounded-pill h-100" style={{ width: `${sub.pct}%`, background: tone.color, transition: 'width 0.6s ease' }}></div>
+                                                </div>
+
+                                                {/* Row 4: present / absent */}
+                                                <div className="row g-2 mt-auto">
+                                                    <div className="col-6">
+                                                        <div className="rounded-3 px-3 py-2 h-100" style={{ background: '#F4FAF6' }}>
+                                                            <div className="small text-muted text-nowrap"><i className="bi bi-check-circle-fill me-1" style={{ color: '#1E9E5A' }}></i>Present</div>
+                                                            <div className="fw-bold text-dark fs-5 lh-sm">{sub.present}</div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="col-6">
+                                                        <div className="rounded-3 px-3 py-2 h-100" style={{ background: '#FDF5F3' }}>
+                                                            <div className="small text-muted text-nowrap"><i className="bi bi-x-circle-fill me-1" style={{ color: '#C4472B' }}></i>Absent</div>
+                                                            <div className="fw-bold text-dark fs-5 lh-sm">{sub.absent}</div>
+                                                        </div>
+                                                    </div>
                                                 </div>
                                             </Card.Body>
                                         </Card>
                                     </Col>
-                                ))}
+                                    );
+                                })}
                             </Row>
                         )}
 
@@ -431,6 +473,9 @@ const AttendanceHistory = () => {
                                             </tr>
                                         </thead>
                                         <tbody>
+                                            {filteredRecords.length === 0 && (
+                                                <tr><td colSpan="5" className="text-center text-muted py-5">No attendance records match the selected filter.</td></tr>
+                                            )}
                                             {filteredRecords.map((row, i) => (
                                                 <tr key={i}>
                                                     <td className="ps-4 py-3 fw-bold">{formatDate(row.date)}</td>

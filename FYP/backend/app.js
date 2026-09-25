@@ -60,6 +60,10 @@ const Schedule = require("./models/schedule");
 const Datesheet = require("./models/datesheet");
 const TeacherAssignment = require("./models/teacher_assignment");
 const Payment = require("./models/payment");
+const ClassFee = require("./models/class_fee");
+const PaymentOtp = require("./models/payment_otp");
+const { buildProgressReport } = require("./services/progressReport");
+const { renderVoucherHtml, voucherNumberFor, SCHOOL_NAME } = require("./services/feeVoucher");
 const notifications = require("./services/notifications");
 const { verifyConnection: verifyEmailConnection } = require("./services/mailer");
 const { runDailyChecks, scheduleDailyChecks } = require("./jobs/dailyChecks");
@@ -1742,6 +1746,274 @@ app.post("/api/fees/bulk", upload.single('adminVoucher'), async (req, res) => {
     }
 });
 
+const FEE_MONTHS = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+];
+
+// Fee structure: the standard monthly fee for every class. Lists all classes
+// from the Class collection, with monthlyFee null where none is set yet.
+app.get("/api/fee-structure", async (req, res) => {
+    try {
+        const [classes, fees, studentCounts] = await Promise.all([
+            Class.find({}).lean(),
+            ClassFee.find({}).lean(),
+            Student.aggregate([{ $group: { _id: "$classNo", count: { $sum: 1 } } }])
+        ]);
+        const feeByClass = new Map(fees.map(f => [f.classNo, f]));
+        const countByClass = new Map(studentCounts.map(c => [c._id, c.count]));
+        const labels = [...new Set(classes.map(classLabel))]
+            .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+        res.json(labels.map(classNo => ({
+            classNo,
+            monthlyFee: feeByClass.has(classNo) ? feeByClass.get(classNo).monthlyFee : null,
+            updatedAt: feeByClass.has(classNo) ? feeByClass.get(classNo).updatedAt : null,
+            studentCount: countByClass.get(classNo) || 0
+        })));
+    } catch (err) {
+        console.error("Fee structure fetch error:", err);
+        res.status(500).json({ message: "Error fetching fee structure" });
+    }
+});
+
+app.put("/api/fee-structure", async (req, res) => {
+    try {
+        const { role, classNo, monthlyFee } = req.body;
+        if (role !== "admin" && role !== "Admin") {
+            return res.status(403).json({ message: "Unauthorized" });
+        }
+        const cls = String(classNo || '').trim();
+        const fee = Math.round(Number(monthlyFee));
+        if (!cls) return res.status(400).json({ message: "Class is required." });
+        if (!Number.isFinite(fee) || fee < 1) {
+            return res.status(400).json({ message: "Monthly fee must be greater than 0." });
+        }
+        const classes = await Class.find({}).lean();
+        if (!classes.some(c => classLabel(c) === cls)) {
+            return res.status(404).json({ message: `Class ${cls} does not exist.` });
+        }
+        const record = await ClassFee.findOneAndUpdate(
+            { classNo: cls },
+            { monthlyFee: fee },
+            { upsert: true, new: true, runValidators: true }
+        ).lean();
+        res.json(record);
+    } catch (err) {
+        console.error("Fee structure save error:", err);
+        res.status(500).json({ message: "Error saving class fee" });
+    }
+});
+
+// Standard monthly fee for one class (used by Issue Fees).
+app.get("/api/fee-structure/:classNo", async (req, res) => {
+    try {
+        const record = await ClassFee.findOne({ classNo: req.params.classNo.trim() }).lean();
+        res.json(record || null);
+    } catch (err) {
+        res.status(500).json({ message: "Error fetching class fee" });
+    }
+});
+
+// System-generated fee vouchers. The admin picks a class (optionally one
+// student), a month, the year and a discount %; the monthly fee comes from the
+// class's fee structure. The system builds one voucher per student from the
+// class roster, then emails each parent their voucher(s).
+//   discountPercent: default discount for every selected student
+//   discounts:       optional { [studentId]: percent } per-student overrides
+//   fineAmount / fineReason: default fine (Rs) added after the discount
+//   fines:           optional { [studentId]: { amount, reason } } per-student overrides
+app.post("/api/fees/generate", async (req, res) => {
+    try {
+        const { role, classNo, studentId, month, year, dueDay, discountPercent, discounts, fineAmount, fineReason, fines } = req.body;
+        if (role !== "admin" && role !== "Admin") {
+            return res.status(403).json({ message: "Unauthorized" });
+        }
+
+        const cls = String(classNo || '').trim();
+        const selectedMonths = month ? [month] : [];
+        const feeYear = Number(year);
+        const day = Number(dueDay);
+        const defaultDiscount = Number(discountPercent || 0);
+        const overrides = discounts && typeof discounts === 'object' ? discounts : {};
+        const defaultFine = Math.round(Number(fineAmount || 0));
+        const defaultFineReason = String(fineReason || '').trim().slice(0, 100);
+        const fineOverrides = fines && typeof fines === 'object' ? fines : {};
+
+        if (!cls) return res.status(400).json({ message: "Class is required." });
+        if (!FEE_MONTHS.includes(month)) {
+            return res.status(400).json({ message: "Select a valid fee month." });
+        }
+        if (!Number.isInteger(feeYear) || feeYear < 2000 || feeYear > 2100) {
+            return res.status(400).json({ message: "A valid fee year is required." });
+        }
+        if (!Number.isInteger(day) || day < 1 || day > 28) {
+            return res.status(400).json({ message: "Due day must be between 1 and 28." });
+        }
+        const validPercent = (p) => Number.isFinite(p) && p >= 0 && p <= 100;
+        if (!validPercent(defaultDiscount) || Object.values(overrides).some(p => p !== '' && !validPercent(Number(p)))) {
+            return res.status(400).json({ message: "Discount must be between 0 and 100%." });
+        }
+        const validFine = (f) => Number.isFinite(f) && f >= 0 && f <= 1000000;
+        if (!validFine(defaultFine) || Object.values(fineOverrides).some(f => f && f.amount !== '' && f.amount !== undefined && !validFine(Number(f.amount)))) {
+            return res.status(400).json({ message: "Fine must be a positive amount." });
+        }
+        if (defaultFine > 0 && !defaultFineReason) {
+            return res.status(400).json({ message: "Please enter a reason for the fine." });
+        }
+
+        // Due date = chosen day of each fee month. Vouchers that would already
+        // be overdue on the day they're created are refused.
+        const pad = (n) => String(n).padStart(2, '0');
+        const dueDateFor = (month) => `${feeYear}-${pad(FEE_MONTHS.indexOf(month) + 1)}-${pad(day)}`;
+        const today = new Date();
+        const todayStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+        if (dueDateFor(month) < todayStr) {
+            return res.status(400).json({
+                message: `Due date ${dueDateFor(month)} has already passed. Choose a later due day or a different month.`
+            });
+        }
+
+        const classFee = await ClassFee.findOne({ classNo: cls }).lean();
+        if (!classFee) {
+            return res.status(400).json({ message: `No monthly fee is set for class ${cls}. Set it in Fee Structure first.` });
+        }
+        const baseFee = classFee.monthlyFee;
+
+        const studentQuery = { classNo: cls };
+        if (studentId) {
+            if (!mongoose.Types.ObjectId.isValid(studentId)) {
+                return res.status(400).json({ message: "Invalid student." });
+            }
+            studentQuery._id = studentId;
+        }
+        const students = await Student.find(studentQuery).lean();
+        if (!students.length) {
+            return res.status(400).json({ message: studentId ? "Selected student is not in this class." : "No students found in this class." });
+        }
+
+        const parents = await Parent.find({ studentIds: { $in: students.map(s => s._id) } }).lean();
+        const parentOf = (sid) => parents.find(p => p.studentIds.some(id => id.toString() === sid.toString()));
+
+        // Existing vouchers for these students/months. Older manual vouchers have
+        // no studentId, so also match them by student name + parent email.
+        const existing = await Fee.find({
+            year: feeYear,
+            month: { $in: selectedMonths },
+            $or: [
+                { studentId: { $in: students.map(s => s._id) } },
+                { studentName: { $in: students.map(s => s.studentName) } }
+            ]
+        }).lean();
+        const isDuplicate = (student, parent, month) => existing.some(f =>
+            f.month === month && (
+                (f.studentId && f.studentId.toString() === student._id.toString()) ||
+                (!f.studentId && f.studentName === student.studentName && f.parentEmail === parent.parentEmail)
+            ));
+
+        const toInsert = [];
+        const skippedNoParent = [];
+        const skippedDuplicate = [];
+        for (const student of students) {
+            const parent = parentOf(student._id);
+            if (!parent || !parent.parentEmail) {
+                skippedNoParent.push(student.studentName);
+                continue;
+            }
+            const override = overrides[student._id.toString()];
+            const percent = override !== undefined && override !== '' ? Number(override) : defaultDiscount;
+            const discountAmount = Math.round(baseFee * percent / 100);
+            const fineOverride = fineOverrides[student._id.toString()];
+            const hasFineOverride = fineOverride && fineOverride.amount !== undefined && fineOverride.amount !== '';
+            const fine = hasFineOverride ? Math.round(Number(fineOverride.amount)) : defaultFine;
+            const fineNote = fine > 0
+                ? (hasFineOverride && String(fineOverride.reason || '').trim() ? String(fineOverride.reason).trim().slice(0, 100) : defaultFineReason || 'Fine')
+                : '';
+
+            for (const month of selectedMonths) {
+                if (isDuplicate(student, parent, month)) {
+                    skippedDuplicate.push(`${student.studentName} (${month})`);
+                    continue;
+                }
+                const netAmount = baseFee - discountAmount + fine;
+                toInsert.push({
+                    studentId: student._id,
+                    studentName: student.studentName,
+                    classNo: cls,
+                    parentEmail: parent.parentEmail,
+                    originalAmount: baseFee,
+                    discountPercent: percent,
+                    discountAmount,
+                    fineAmount: fine,
+                    fineReason: fineNote,
+                    amount: netAmount,
+                    dueDate: dueDateFor(month),
+                    month,
+                    year: feeYear,
+                    // A 100% discount (and no fine) leaves nothing to pay, so the
+                    // voucher is settled on issue instead of waiting for a payment.
+                    status: netAmount === 0 ? 'Paid' : 'Pending',
+                    paidAt: netAmount === 0 ? new Date() : null
+                });
+            }
+        }
+
+        if (!toInsert.length) {
+            return res.status(400).json({
+                message: "No new vouchers to generate. Every selected student already has a voucher for this month or has no linked parent.",
+                skippedDuplicate,
+                skippedNoParent
+            });
+        }
+
+        const created = await Fee.insertMany(toInsert);
+
+        // Group by parent so a parent with several children / months gets one email.
+        const byParent = new Map();
+        created.forEach(fee => {
+            if (!byParent.has(fee.parentEmail)) byParent.set(fee.parentEmail, []);
+            byParent.get(fee.parentEmail).push(fee.toObject());
+        });
+
+        res.status(201).json({
+            message: `Generated ${created.length} fee voucher(s) for ${byParent.size} parent(s).`,
+            created: created.length,
+            parentsNotified: byParent.size,
+            skippedDuplicate,
+            skippedNoParent
+        });
+
+        // Fire-and-forget: the response should not wait on SMTP.
+        Promise.allSettled([...byParent.entries()].map(async ([parentEmail, fees]) => {
+            const parent = parents.find(p => p.parentEmail === parentEmail);
+            const result = await notifications.notifyFeesIssued({ parentEmail, parentName: parent && parent.parentName, fees });
+            if (result && result.sent) {
+                await Fee.updateMany({ _id: { $in: fees.map(f => f._id) } }, { $set: { issueNotifiedAt: new Date() } });
+            }
+        })).catch(err => console.error('Fee issue notification error:', err));
+        return;
+    } catch (err) {
+        console.error("Fee generation error:", err);
+        res.status(500).json({ message: "Error generating fee vouchers" });
+    }
+});
+
+// Printable, system-generated voucher (HTML). Open in a browser and use
+// Print / Save as PDF.
+app.get("/api/fees/:id/voucher", async (req, res) => {
+    try {
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            return res.status(404).send("Voucher not found.");
+        }
+        const fee = await Fee.findById(req.params.id).lean();
+        if (!fee) return res.status(404).send("Voucher not found.");
+        const student = fee.studentId ? await Student.findById(fee.studentId).lean() : null;
+        res.type('html').send(renderVoucherHtml(fee, student));
+    } catch (err) {
+        console.error("Voucher render error:", err);
+        res.status(500).send("Error generating voucher.");
+    }
+});
+
 app.get("/api/fees", async (req, res) => {
     try {
         const { role, email } = req.query;
@@ -1767,7 +2039,7 @@ app.put("/api/fees/:id/upload-receipt", upload.single('parentReceipt'), async (r
             return res.status(400).json({ message: "Receipt file is required." });
         }
 
-        const livePayment = await Payment.findOne({ voucherId: id, status: { $in: ['Pending', 'Approved'] } });
+        const livePayment = await Payment.findOne({ voucherId: id, status: { $in: ['Successful', 'Pending', 'Approved'] } });
         if (livePayment) {
             return res.status(409).json({ message: `An online payment (${livePayment.transactionId}) is already ${livePayment.status.toLowerCase()} for this voucher.` });
         }
@@ -1798,10 +2070,16 @@ app.put("/api/fees/:id/upload-receipt", upload.single('parentReceipt'), async (r
 app.put("/api/fees/:id/approve", async (req, res) => {
     try {
         const { id } = req.params;
+        const now = new Date();
         const updatedFee = await Fee.findByIdAndUpdate(
             id,
-            { status: 'Paid', paidAt: new Date() },
+            { status: 'Paid', paidAt: now },
             { new: true }
+        );
+        // An online payment under review for this voucher is approved with it.
+        await Payment.updateMany(
+            { voucherId: id, status: { $in: ['Successful', 'Pending'] } },
+            { status: 'Approved', approvedAt: now }
         );
         res.json(updatedFee);
     } catch (err) {
@@ -1810,12 +2088,23 @@ app.put("/api/fees/:id/approve", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Mock online payments (simulation only - no real gateway, no real money).
-// Flow: parent submits -> Pending -> admin approves (voucher -> Paid) or
-// rejects (voucher stays unpaid). Parents can never mark a voucher Paid.
+// Online payments via the built-in sandbox gateway (no real gateway, no real
+// money). The parent enters the payment details, confirms with a 6-digit OTP
+// emailed to their registered address, and the payment goes through.
+// A successful payment puts the voucher Under Review; an admin then approves
+// it (voucher -> Paid) or rejects it (voucher back to unpaid).
 // ---------------------------------------------------------------------------
 
-const PAYMENT_METHODS = ['Mock Card', 'Mock JazzCash', 'Mock Easypaisa'];
+const PAYMENT_METHODS = ['Card', 'JazzCash', 'Easypaisa'];
+
+// Payments waiting for the admin: 'Successful' (paid online, voucher Under
+// Review) and older 'Pending' submissions.
+const REVIEWABLE_PAYMENT_STATUSES = ['Successful', 'Pending'];
+
+// Older records were saved as 'Mock Card' etc.; show them with the plain name.
+function displayPaymentMethod(method) {
+    return String(method || '').replace(/^Mock\s+/, '');
+}
 
 // The app has no session/token auth: every route receives role + email from
 // the client. These at least confirm the email belongs to a real account of
@@ -1832,14 +2121,10 @@ async function getParentFromRequest(req) {
     return Parent.findOne({ parentEmail: src.email });
 }
 
-function voucherNumberFor(fee) {
-    return `VCH-${fee._id.toString().slice(-8).toUpperCase()}`;
-}
-
 function generateTransactionId() {
     const d = new Date();
     const date = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-    return `TXN-${date}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+    return `TXN-${date}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
 }
 
 // Flatten a populated payment into what the UI needs.
@@ -1849,9 +2134,11 @@ function serializePayment(p) {
         _id: p._id,
         transactionId: p.transactionId,
         amount: p.amount,
-        paymentMethod: p.paymentMethod,
+        paymentMethod: displayPaymentMethod(p.paymentMethod),
+        accountHolder: p.accountHolder || '',
         accountLast4: p.accountLast4,
         status: p.status,
+        failureReason: p.failureReason || '',
         rejectionReason: p.rejectionReason,
         createdAt: p.createdAt,
         approvedAt: p.approvedAt,
@@ -1883,85 +2170,268 @@ function populatePayment(query) {
         .populate('rejectedBy', 'adminName');
 }
 
-// Submit a mock payment (parent)
+// Checks the payment details and that `parent` may pay voucher `voucherId`
+// now. Returns { fee, digits, holder } or { status, message } on failure.
+async function checkPaymentRequest(parent, body) {
+    const { voucherId, amount, paymentMethod, accountNumber } = body;
+    const holder = String(body.accountHolder || '').trim();
+
+    if (!voucherId || !mongoose.isValidObjectId(voucherId)) {
+        return { status: 400, message: "A valid fee voucher is required." };
+    }
+    if (!PAYMENT_METHODS.includes(paymentMethod)) {
+        return { status: 400, message: "Please choose a valid payment method." };
+    }
+    if (!/^[A-Za-z][A-Za-z .'-]{2,59}$/.test(holder)) {
+        return { status: 400, message: "Please enter the account holder's name." };
+    }
+    // Card = 16 digits, wallet = 11-digit mobile number. Only the last 4
+    // digits are stored; the CVV is never sent to the server.
+    const digits = String(accountNumber || '').replace(/\D/g, '');
+    if (paymentMethod === 'Card' && digits.length !== 16) {
+        return { status: 400, message: "Card number must be 16 digits." };
+    }
+    if (paymentMethod !== 'Card' && !/^03\d{9}$/.test(digits)) {
+        return { status: 400, message: "Account number must be an 11-digit mobile number (03XXXXXXXXX)." };
+    }
+
+    const fee = await Fee.findById(voucherId);
+    if (!fee) return { status: 404, message: "Fee voucher not found." };
+    if (fee.parentEmail !== parent.parentEmail) {
+        return { status: 403, message: "You can only pay vouchers issued to you." };
+    }
+    if (fee.status === 'Paid') return { status: 409, message: "This fee voucher has already been paid." };
+    if (fee.status === 'Review') return { status: 409, message: "A payment for this voucher is already under review." };
+    if (Number(amount) !== fee.amount) {
+        return { status: 400, message: `Payment amount must equal the voucher amount (Rs ${fee.amount}).` };
+    }
+
+    const live = await Payment.findOne({ activeVoucher: fee._id });
+    if (live) {
+        return {
+            status: 409,
+            message: live.status === 'Approved'
+                ? "This fee voucher has already been paid."
+                : `A payment (${live.transactionId}) for this voucher is already under review.`
+        };
+    }
+    return { fee, digits, holder };
+}
+
+const PAYMENT_OTP_MINUTES = 2;
+const PAYMENT_OTP_MAX_ATTEMPTS = 5;
+const PAYMENT_OTP_RESEND_SECONDS = 30;
+
+function hashOtp(code, salt) {
+    return crypto.createHash('sha256').update(`${salt}:${code}`).digest('hex');
+}
+
+// "usman.baig@gmail.com" -> "us*******@gmail.com"
+function maskEmail(email) {
+    const [user, domain] = String(email || '').split('@');
+    if (!domain) return email;
+    return `${user.slice(0, 2)}${'*'.repeat(Math.max(user.length - 2, 3))}@${domain}`;
+}
+
+// Step 1 (parent): validate the payment details and email a 6-digit OTP to
+// the parent's registered email address.
+app.post("/api/payments/otp", async (req, res) => {
+    try {
+        const parent = await getParentFromRequest(req);
+        if (!parent) return res.status(403).json({ message: "Please log in as a parent to make a payment." });
+
+        const check = await checkPaymentRequest(parent, req.body);
+        if (check.message) return res.status(check.status).json({ message: check.message });
+        const { fee, digits } = check;
+
+        const recent = await PaymentOtp.findOne({ parentId: parent._id, voucherId: fee._id, consumedAt: null })
+            .sort({ createdAt: -1 });
+        if (recent) {
+            const wait = PAYMENT_OTP_RESEND_SECONDS - Math.floor((Date.now() - recent.createdAt.getTime()) / 1000);
+            if (wait > 0) {
+                return res.status(429).json({ message: `Please wait ${wait} seconds before requesting a new code.` });
+            }
+        }
+        // A new code replaces any earlier unused one for this voucher.
+        await PaymentOtp.deleteMany({ parentId: parent._id, voucherId: fee._id, consumedAt: null });
+
+        const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+        const salt = crypto.randomBytes(16).toString('hex');
+        const otp = await PaymentOtp.create({
+            parentId: parent._id,
+            voucherId: fee._id,
+            paymentMethod: req.body.paymentMethod,
+            accountLast4: digits.slice(-4),
+            codeHash: hashOtp(code, salt),
+            salt,
+            expiresAt: new Date(Date.now() + PAYMENT_OTP_MINUTES * 60 * 1000)
+        });
+
+        const mail = await notifications.notifyPaymentOtp({
+            to: parent.parentEmail,
+            parentName: parent.parentName,
+            code,
+            minutes: PAYMENT_OTP_MINUTES,
+            fee,
+            paymentMethod: req.body.paymentMethod,
+            accountLast4: digits.slice(-4)
+        });
+        if (!mail.sent) {
+            await PaymentOtp.deleteOne({ _id: otp._id });
+            return res.status(503).json({ message: "We couldn't send the verification code to your email. Please try again in a moment." });
+        }
+
+        res.json({
+            otpId: otp._id,
+            sentTo: maskEmail(parent.parentEmail),
+            expiresAt: otp.expiresAt,
+            validSeconds: PAYMENT_OTP_MINUTES * 60,
+            resendAfterSeconds: PAYMENT_OTP_RESEND_SECONDS
+        });
+    } catch (err) {
+        console.error("Payment OTP error:", err);
+        res.status(500).json({ message: "Something went wrong while sending the verification code. Please try again." });
+    }
+});
+
+// Step 2 (parent): verify the emailed OTP and process the payment. A
+// successful payment puts the voucher Under Review for the admin.
 app.post("/api/payments", async (req, res) => {
     try {
         const parent = await getParentFromRequest(req);
-        if (!parent) return res.status(403).json({ message: "Only a logged-in parent can submit payments." });
+        if (!parent) return res.status(403).json({ message: "Please log in as a parent to make a payment." });
 
-        const { voucherId, amount, paymentMethod, accountNumber } = req.body;
-        if (!voucherId || !mongoose.isValidObjectId(voucherId)) {
-            return res.status(400).json({ message: "A valid fee voucher is required." });
+        const check = await checkPaymentRequest(parent, req.body);
+        if (check.message) return res.status(check.status).json({ message: check.message });
+        const { fee, digits, holder } = check;
+        const { paymentMethod, otpId } = req.body;
+        const otpCode = String(req.body.otpCode || '').trim();
+
+        // --- OTP verification ---
+        if (!otpId || !mongoose.isValidObjectId(otpId)) {
+            return res.status(400).json({ code: 'OTP_REQUIRED', message: "Please request a verification code first." });
         }
-        if (!PAYMENT_METHODS.includes(paymentMethod)) {
-            return res.status(400).json({ message: "Invalid payment method." });
+        const otp = await PaymentOtp.findById(otpId);
+        if (!otp || otp.consumedAt || String(otp.parentId) !== String(parent._id) || String(otp.voucherId) !== String(fee._id)) {
+            return res.status(400).json({ code: 'OTP_EXPIRED', message: "This verification code is no longer valid. Please request a new one." });
+        }
+        if (otp.paymentMethod !== paymentMethod || otp.accountLast4 !== digits.slice(-4)) {
+            return res.status(400).json({ code: 'OTP_EXPIRED', message: "Payment details changed after the code was sent. Please request a new code." });
+        }
+        if (otp.expiresAt < new Date()) {
+            return res.status(400).json({ code: 'OTP_EXPIRED', message: "This verification code has expired. Please request a new one." });
+        }
+        if (otp.attempts >= PAYMENT_OTP_MAX_ATTEMPTS) {
+            return res.status(400).json({ code: 'OTP_EXPIRED', message: "Too many incorrect attempts. Please request a new code." });
+        }
+        const given = Buffer.from(hashOtp(otpCode, otp.salt), 'hex');
+        const expected = Buffer.from(otp.codeHash, 'hex');
+        if (!/^\d{6}$/.test(otpCode) || !crypto.timingSafeEqual(given, expected)) {
+            const updated = await PaymentOtp.findByIdAndUpdate(otp._id, { $inc: { attempts: 1 } }, { new: true });
+            const left = PAYMENT_OTP_MAX_ATTEMPTS - updated.attempts;
+            return res.status(400).json({
+                code: left > 0 ? 'OTP_INVALID' : 'OTP_EXPIRED',
+                message: left > 0
+                    ? `Incorrect verification code. ${left} attempt${left === 1 ? '' : 's'} left.`
+                    : "Too many incorrect attempts. Please request a new code."
+            });
+        }
+        // Consume atomically so the same code can't pay twice.
+        const consumed = await PaymentOtp.findOneAndUpdate(
+            { _id: otp._id, consumedAt: null },
+            { consumedAt: new Date() }
+        );
+        if (!consumed) {
+            return res.status(400).json({ code: 'OTP_EXPIRED', message: "This verification code has already been used." });
         }
 
-        // Dummy details only. Card = 16 digits, wallet = 11-digit mobile number.
-        // Only the last 4 digits are stored; CVV / PIN are never sent here.
-        const digits = String(accountNumber || '').replace(/\D/g, '');
-        if (paymentMethod === 'Mock Card' && digits.length !== 16) {
-            return res.status(400).json({ message: "Enter a 16-digit dummy card number." });
-        }
-        if (paymentMethod !== 'Mock Card' && !/^03\d{9}$/.test(digits)) {
-            return res.status(400).json({ message: "Enter an 11-digit dummy mobile wallet number (03XXXXXXXXX)." });
+        // --- Payment ---
+        let studentId = fee.studentId;
+        if (!studentId) {
+            const children = await Student.find({ _id: { $in: parent.studentIds } }, 'studentName').lean();
+            const student = children.find(c => c.studentName === fee.studentName);
+            studentId = student ? student._id : undefined;
         }
 
-        const fee = await Fee.findById(voucherId);
-        if (!fee) return res.status(404).json({ message: "Fee voucher not found." });
-        if (fee.parentEmail !== parent.parentEmail) {
-            return res.status(403).json({ message: "You can only pay vouchers issued to you." });
-        }
-        if (fee.status === 'Paid') {
-            return res.status(409).json({ message: "This voucher is already paid." });
-        }
-        if (fee.status === 'Review') {
-            return res.status(409).json({ message: "A bank receipt for this voucher is already under review." });
-        }
-        if (Number(amount) !== fee.amount) {
-            return res.status(400).json({ message: `Payment amount must equal the voucher amount (Rs ${fee.amount}).` });
-        }
-
-        const live = await Payment.findOne({ activeVoucher: fee._id });
-        if (live) {
-            return res.status(409).json({ message: `A payment (${live.transactionId}) is already ${live.status.toLowerCase()} for this voucher.` });
-        }
-
-        const children = await Student.find({ _id: { $in: parent.studentIds } }, 'studentName').lean();
-        const student = children.find(c => c.studentName === fee.studentName);
-
-        const payment = new Payment({
-            transactionId: generateTransactionId(),
+        const base = {
             voucherId: fee._id,
-            studentId: student ? student._id : undefined,
+            studentId,
             parentId: parent._id,
             amount: fee.amount,
             paymentMethod,
+            accountHolder: holder,
             accountLast4: digits.slice(-4),
-            status: 'Pending',
+            status: 'Successful',
             activeVoucher: fee._id
-        });
-        await payment.save();
+        };
 
+        // Retry on the (unlikely) event of a transaction ID collision.
+        let payment;
+        for (let attempt = 0; attempt < 3 && !payment; attempt++) {
+            try {
+                payment = await Payment.create({ ...base, transactionId: generateTransactionId() });
+            } catch (err) {
+                if (!(err && err.code === 11000 && err.keyPattern && err.keyPattern.transactionId)) throw err;
+            }
+        }
+        if (!payment) throw new Error('Could not allocate a transaction ID.');
+
+        await Fee.findByIdAndUpdate(fee._id, { status: 'Review' });
         adminAlertQueue.push({
             _id: Date.now().toString(),
-            title: "Action Required: Online Payment Submitted",
-            content: `${fee.studentName}'s parent submitted payment ${payment.transactionId} for ${fee.month}. Please review it under Fee Records → Online Payments.`,
+            title: "Action Required: Online Payment Received",
+            content: `${fee.studentName}'s parent paid Rs ${fee.amount} for ${fee.month} ${fee.year} (${payment.transactionId}). Please verify it under Fee Records.`,
             isAlert: true,
             createdAt: new Date()
         });
 
-        const saved = await populatePayment(Payment.findById(payment._id));
+        const saved = serializePayment(await populatePayment(Payment.findById(payment._id)));
         res.status(201).json({
-            message: "Payment submitted successfully. Your payment is waiting for admin approval.",
-            payment: serializePayment(saved)
+            result: 'success',
+            message: "Payment successful. It is now under review by the school.",
+            payment: saved
         });
+
+        notifications.notifyPaymentReceived({ ...saved, parentEmail: parent.parentEmail, school: SCHOOL_NAME })
+            .catch(err => console.error('Payment notification error:', err));
     } catch (err) {
         if (err && err.code === 11000) {
-            return res.status(409).json({ message: "A payment is already in progress for this voucher." });
+            return res.status(409).json({ message: "A payment for this voucher is already under review." });
         }
         console.error("Submit payment error:", err);
-        res.status(500).json({ message: "Error submitting payment" });
+        res.status(500).json({ message: "Something went wrong while processing your payment. Please try again." });
+    }
+});
+
+// Auto-generated progress report (results, attendance, homework, fees and
+// fines). A parent may view only their own children; a student only
+// themselves.
+app.get("/api/reports/student/:studentId", async (req, res) => {
+    try {
+        const { studentId } = req.params;
+        if (!mongoose.isValidObjectId(studentId)) return res.status(400).json({ message: "Invalid student." });
+
+        const role = String(req.query.role || '').toLowerCase();
+        const email = String(req.query.email || '');
+        if (role === 'parent') {
+            const parent = await Parent.findOne({ parentEmail: email }).lean();
+            if (!parent || !(parent.studentIds || []).some(id => String(id) === studentId)) {
+                return res.status(403).json({ message: "You can only view reports for your own children." });
+            }
+        } else if (role === 'student') {
+            const student = await Student.findOne({ _id: studentId, studentEmail: email }).lean();
+            if (!student) return res.status(403).json({ message: "You can only view your own report." });
+        } else if (role !== 'admin' || !(await Admin.findOne({ adminEmail: email }))) {
+            return res.status(403).json({ message: "Unauthorized" });
+        }
+
+        const report = await buildProgressReport(studentId);
+        if (!report) return res.status(404).json({ message: "Student not found." });
+        report.student.image = sanitizePath(report.student.image);
+        res.json(report);
+    } catch (err) {
+        console.error("Progress report error:", err);
+        res.status(500).json({ message: "Error generating progress report" });
     }
 });
 
@@ -1987,7 +2457,7 @@ app.get("/api/payments", async (req, res) => {
 
         const { status, search } = req.query;
         const filter = {};
-        if (status && ['Pending', 'Approved', 'Rejected'].includes(status)) filter.status = status;
+        if (status && ['Successful', 'Failed', 'Pending', 'Approved', 'Rejected'].includes(status)) filter.status = status;
 
         let payments = (await populatePayment(Payment.find(filter).sort({ createdAt: -1 }))).map(serializePayment);
         if (search && search.trim()) {
@@ -2040,28 +2510,33 @@ app.get("/api/payments/:id", async (req, res) => {
     }
 });
 
-// Receipt - only for Approved payments
+// Receipt - only for completed payments (Successful, or Approved by an admin)
 app.get("/api/payments/:id/receipt", async (req, res) => {
     try {
         const payment = await loadAuthorizedPayment(req, res);
         if (!payment) return;
-        if (payment.status !== 'Approved') {
-            return res.status(403).json({ message: "A receipt is available only after admin approval." });
+        if (payment.status !== 'Successful' && payment.status !== 'Approved') {
+            return res.status(403).json({ message: "A receipt is available only for successful payments." });
         }
         const p = serializePayment(payment);
         res.json({
-            school: "EduGuardian",
+            school: SCHOOL_NAME,
             studentName: p.studentName,
             parentName: p.parentName,
+            classNo: p.voucher ? p.voucher.classNo : '',
             voucherNumber: p.voucher ? p.voucher.voucherNumber : '',
             feeMonth: p.voucher ? `${p.voucher.month} ${p.voucher.year}` : '',
             amount: p.amount,
             paymentMethod: p.paymentMethod,
+            accountHolder: p.accountHolder,
+            accountLast4: p.accountLast4,
             transactionId: p.transactionId,
             paymentDate: p.createdAt,
             approvalDate: p.approvedAt,
             approvedBy: p.approvedBy,
-            status: "PAID"
+            status: "PAID",
+            // Successful = paid, awaiting the school's verification.
+            voucherStatus: p.status === 'Approved' ? 'Verified' : 'Under Review'
         });
     } catch (err) {
         console.error("Fetch receipt error:", err);
@@ -2069,7 +2544,7 @@ app.get("/api/payments/:id/receipt", async (req, res) => {
     }
 });
 
-// Approve (admin) - payment Pending -> Approved, voucher -> Paid
+// Approve (admin) - payment Successful/Pending -> Approved, voucher -> Paid
 app.put("/api/payments/:id/approve", async (req, res) => {
     try {
         const admin = await getAdminFromRequest(req);
@@ -2078,8 +2553,8 @@ app.put("/api/payments/:id/approve", async (req, res) => {
 
         const payment = await Payment.findById(req.params.id);
         if (!payment) return res.status(404).json({ message: "Payment not found." });
-        if (payment.status !== 'Pending') {
-            return res.status(409).json({ message: `Only pending payments can be approved (this one is ${payment.status}).` });
+        if (!REVIEWABLE_PAYMENT_STATUSES.includes(payment.status)) {
+            return res.status(409).json({ message: `Only payments under review can be approved (this one is ${payment.status}).` });
         }
         const fee = await Fee.findById(payment.voucherId);
         if (!fee) return res.status(404).json({ message: "The related fee voucher no longer exists." });
@@ -2090,7 +2565,7 @@ app.put("/api/payments/:id/approve", async (req, res) => {
         const now = new Date();
         // Conditional update so two admins clicking at once can't both approve.
         const approved = await Payment.findOneAndUpdate(
-            { _id: payment._id, status: 'Pending' },
+            { _id: payment._id, status: { $in: REVIEWABLE_PAYMENT_STATUSES } },
             { status: 'Approved', approvedBy: admin._id, approvedAt: now },
             { new: true }
         );
@@ -2106,7 +2581,7 @@ app.put("/api/payments/:id/approve", async (req, res) => {
     }
 });
 
-// Reject (admin) - payment Pending -> Rejected, voucher stays unpaid
+// Reject (admin) - payment Successful/Pending -> Rejected, voucher back to unpaid
 app.put("/api/payments/:id/reject", async (req, res) => {
     try {
         const admin = await getAdminFromRequest(req);
@@ -2114,7 +2589,7 @@ app.put("/api/payments/:id/reject", async (req, res) => {
         if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ message: "Invalid payment id." });
 
         const rejected = await Payment.findOneAndUpdate(
-            { _id: req.params.id, status: 'Pending' },
+            { _id: req.params.id, status: { $in: REVIEWABLE_PAYMENT_STATUSES } },
             {
                 $set: {
                     status: 'Rejected',
@@ -2130,9 +2605,11 @@ app.put("/api/payments/:id/reject", async (req, res) => {
         if (!rejected) {
             const exists = await Payment.exists({ _id: req.params.id });
             return exists
-                ? res.status(409).json({ message: "Only pending payments can be rejected." })
+                ? res.status(409).json({ message: "Only payments under review can be rejected." })
                 : res.status(404).json({ message: "Payment not found." });
         }
+        // Voucher leaves 'Review' so the parent can pay again.
+        await Fee.updateOne({ _id: rejected.voucherId, status: 'Review' }, { status: 'Pending' });
 
         const result = await populatePayment(Payment.findById(rejected._id));
         res.json({ message: "Payment rejected. Voucher remains unpaid.", payment: serializePayment(result) });
@@ -2805,6 +3282,15 @@ app.put("/api/fees/:id/reject", async (req, res) => {
             status: "Pending",
             parentReceipt: ""
         });
+        // Reject any online payment under review for this voucher too, and
+        // free the voucher so the parent can pay again.
+        await Payment.updateMany(
+            { voucherId: req.params.id, status: { $in: ['Successful', 'Pending'] } },
+            {
+                $set: { status: 'Rejected', rejectedAt: new Date(), rejectionReason: 'Payment could not be verified by the school.' },
+                $unset: { activeVoucher: 1 }
+            }
+        );
         res.json({ message: "Fee rejected and reset to pending" });
     } catch (err) {
         res.status(500).json({ message: "Failed to reject fee" });

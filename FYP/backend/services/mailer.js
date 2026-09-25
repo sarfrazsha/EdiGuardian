@@ -53,7 +53,7 @@ async function verifyConnection() {
 // Sends one email. Never throws - callers (attendance/results/fees/homework
 // routes) must not fail their main request just because an email didn't go out.
 // Returns { sent: boolean, error?: string, skipped?: boolean }.
-async function sendMail({ to, subject, html, text }) {
+async function sendMail({ to, subject, html, text, attachments }) {
     if (!to) {
         console.warn(`[email] Skipped "${subject}": no recipient address.`);
         return { sent: false, skipped: true, error: 'No recipient' };
@@ -69,7 +69,8 @@ async function sendMail({ to, subject, html, text }) {
             to,
             subject,
             html,
-            text: text || html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+            text: text || html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(),
+            attachments
         });
         console.log(`[email] Sent "${subject}" to ${to}`);
         return { sent: true };

@@ -3,6 +3,21 @@ import { Container, Row, Col, Card, Button, Badge, Table, Spinner, Nav } from 'r
 import { Navigate, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 
+// Same thresholds as result publishing on the server.
+const gradeFor = (pct) => {
+    const label = pct >= 80 ? 'A+' : pct >= 70 ? 'A' : pct >= 60 ? 'B' : pct >= 50 ? 'C' : pct >= 40 ? 'D' : 'F';
+    const tone = pct >= 70 ? { color: '#1E7A4A', bg: '#E4F4EA' } : pct >= 50 ? { color: '#8A5A00', bg: '#FBF0DA' } : { color: '#B4381C', bg: '#FDEEEA' };
+    return { label, ...tone };
+};
+
+const SUBJECT_ICONS = [
+    [/math/, 'bi-calculator'], [/phys/, 'bi-lightning-charge'], [/chem/, 'bi-droplet-half'],
+    [/bio/, 'bi-flower1'], [/computer|ict|it\b/, 'bi-laptop'], [/english/, 'bi-translate'],
+    [/urdu/, 'bi-book'], [/islam/, 'bi-moon-stars'], [/pak|social|history/, 'bi-bank'],
+    [/geo/, 'bi-globe-americas'], [/science/, 'bi-lightbulb'], [/art|draw/, 'bi-palette']
+];
+const subjectIcon = (name) => (SUBJECT_ICONS.find(([re]) => re.test(String(name).toLowerCase())) || [null, 'bi-journal-text'])[1];
+
 const Results = () => {
     const navigate = useNavigate();
     const role = localStorage.getItem('userRole')?.toLowerCase();
@@ -14,7 +29,16 @@ const Results = () => {
     const selectedChildClass = localStorage.getItem('selectedChildClass');
     const classNo = (role === 'parent' && selectedChildClass) ? selectedChildClass : cNo;
     
-    const studentName = localStorage.getItem('userName');
+    const studentName = (() => {
+        if (role === 'parent') {
+            try {
+                const kids = JSON.parse(localStorage.getItem('parentChildren') || '[]');
+                const kid = kids.find(k => k.id === selectedChild);
+                if (kid?.name) return kid.name;
+            } catch { /* fall through */ }
+        }
+        return localStorage.getItem('userName');
+    })();
 
     if (!role || (role !== 'student' && role !== 'parent')) {
         return <Navigate to="/" replace />;
@@ -88,7 +112,7 @@ const Results = () => {
 
                 <Card className="border-0 shadow-sm rounded-4 mb-4 overflow-hidden">
                     <Card.Body className="p-0">
-                        <Nav variant="pills" className="nav-fill bg-light p-2" activeKey={activeTerm} onSelect={(k) => setActiveTerm(k)}>
+                        <Nav variant="pills" className="nav-fill bg-light p-2 results-term-tabs" activeKey={activeTerm} onSelect={(k) => setActiveTerm(k)}>
                             {Array.from(new Set(results.map(r => r.examType))).map(type => (
                                 <Nav.Item key={type}>
                                     <Nav.Link eventKey={type} className="rounded-pill py-2 fw-bold">{type}</Nav.Link>
@@ -108,91 +132,136 @@ const Results = () => {
                         <Spinner animation="border" variant="primary" />
                         <p className="mt-3 text-muted">Retrieving your academic record...</p>
                     </div>
-                ) : result ? (
-                    <Row className="g-4">
-                        <Col lg={4}>
-                            <Card className="border-0 shadow-sm rounded-4 h-100 bg-primary text-white text-center position-relative overflow-hidden">
-                                <div className="position-absolute top-0 end-0 p-3 opacity-25">
-                                    <i className="bi bi-award-fill" style={{ fontSize: '8rem' }}></i>
-                                </div>
-                                <Card.Body className="p-5 position-relative">
-                                    <div className="bg-white bg-opacity-20 rounded-circle d-inline-flex p-4 mb-4">
-                                        <h1 className="fw-bold mb-0" style={{ fontSize: '3rem' }}>{result.grade.label}</h1>
-                                    </div>
-                                    <h4 className="fw-bold mb-1">Final Outcome</h4>
-                                    <Badge bg={result.status === 'Passed' ? 'success' : 'danger'} className="px-4 py-2 rounded-pill fs-6 mb-4 shadow-sm">
-                                        {result.status}
-                                    </Badge>
-                                    
-                                    <div className="mt-4 pt-4 border-top border-white border-opacity-25">
-                                        <Row>
-                                            <Col xs={6} className="border-end border-white border-opacity-25">
-                                                <div className="small opacity-75">Total Marks</div>
-                                                <div className="h4 fw-bold mb-0">{result.grandTotal}/{result.maxTotal}</div>
-                                            </Col>
-                                            <Col xs={6}>
-                                                <div className="small opacity-75">Percentage</div>
-                                                <div className="h4 fw-bold mb-0">{result.maxTotal > 0 ? ((result.grandTotal / result.maxTotal) * 100).toFixed(1) : 0}%</div>
-                                            </Col>
-                                        </Row>
-                                    </div>
-                                </Card.Body>
-                            </Card>
-                        </Col>
+                ) : result ? (() => {
+                    const overallPct = result.maxTotal > 0 ? Math.round((result.grandTotal / result.maxTotal) * 1000) / 10 : 0;
+                    const subjects = result.subjects.map(s => ({
+                        ...s,
+                        pct: s.totalMarks > 0 ? Math.round((s.score / s.totalMarks) * 1000) / 10 : 0
+                    }));
+                    const ranked = [...subjects].sort((a, b) => b.pct - a.pct);
+                    const best = ranked[0];
+                    const lowest = ranked[ranked.length - 1];
+                    const passed = result.status === 'Passed';
+                    const ringR = 62;
+                    const ringC = 2 * Math.PI * ringR;
 
-                        <Col lg={8}>
-                            <Row className="g-4">
-                                {result.subjects.map((subject, idx) => {
-                                    const colors = ['primary', 'success', 'info', 'warning', 'danger', 'dark'];
-                                    const color = colors[idx % colors.length];
-                                    const icons = {
-                                        math: 'bi-calculator',
-                                        science: 'bi-flask',
-                                        english: 'bi-translate',
-                                        urdu: 'bi-book',
-                                        islamiyat: 'bi-moon-stars',
-                                        history: 'bi-bank'
-                                    };
-                                    const icon = icons[subject.subjectId] || 'bi-journal-text';
-                                    const percentage = subject.totalMarks > 0 ? (subject.score / subject.totalMarks) * 100 : 0;
+                    return (
+                        <Row className="g-4">
+                            <Col lg={4}>
+                                <Card className="border-0 shadow-sm rounded-4 h-100 text-white overflow-hidden position-relative" style={{ background: 'linear-gradient(160deg, #7A5358 0%, #91696E 55%, #A98286 100%)' }}>
+                                    <i className="bi bi-award-fill position-absolute" style={{ fontSize: '9rem', top: -20, right: -18, opacity: 0.12 }}></i>
+                                    <Card.Body className="p-4 p-xl-5 position-relative d-flex flex-column text-center">
+                                        <div className="small text-uppercase fw-semibold text-white-50 mb-3" style={{ letterSpacing: '1.5px' }}>{result.examType} Result</div>
 
-                                    return (
-                                        <Col md={12} key={idx}>
-                                            <Card className="border-0 shadow-sm rounded-4 overflow-hidden">
-                                                <Card.Body className="p-4 d-flex align-items-center">
-                                                    <div className={`bg-${color} bg-opacity-10 p-3 rounded-4 text-${color} me-4 shadow-sm`}>
-                                                        <i className={`bi ${icon} fs-2`}></i>
+                                        {/* Percentage ring with the grade in the middle */}
+                                        <div className="mx-auto mb-3" style={{ width: 150, height: 150 }}>
+                                            <svg width="150" height="150" viewBox="0 0 150 150" role="img" aria-label={`Grade ${result.grade.label}, ${overallPct}%`}>
+                                                <circle cx="75" cy="75" r={ringR} fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.22)" strokeWidth="11" />
+                                                <circle cx="75" cy="75" r={ringR} fill="none" stroke="#FFFFFF" strokeWidth="11" strokeLinecap="round"
+                                                    strokeDasharray={`${(overallPct / 100) * ringC} ${ringC}`} transform="rotate(-90 75 75)"
+                                                    style={{ transition: 'stroke-dasharray 0.9s ease' }} />
+                                                <text x="75" y="72" textAnchor="middle" dominantBaseline="middle" fill="#FFFFFF" style={{ font: '700 44px Fraunces, Georgia, serif' }}>{result.grade.label}</text>
+                                                <text x="75" y="104" textAnchor="middle" fill="rgba(255,255,255,0.85)" style={{ font: '600 14px Inter, sans-serif' }}>{overallPct}%</text>
+                                            </svg>
+                                        </div>
+
+                                        <h4 className="fw-bold mb-2" style={{ fontFamily: 'Fraunces, Georgia, serif' }}>Final Outcome</h4>
+                                        <div className="mb-4">
+                                            <span className="d-inline-flex align-items-center gap-2 rounded-pill px-4 py-2 fw-bold shadow-sm"
+                                                style={{ background: '#FFFFFF', color: passed ? '#1E9E5A' : '#C4472B' }}>
+                                                <i className={`bi ${passed ? 'bi-patch-check-fill' : 'bi-x-octagon-fill'}`}></i>{result.status}
+                                            </span>
+                                        </div>
+
+                                        <Row className="g-2 mt-auto text-start">
+                                            {[
+                                                ['Total Marks', `${result.grandTotal} / ${result.maxTotal}`, 'bi-123'],
+                                                ['Percentage', `${overallPct}%`, 'bi-percent'],
+                                                ['Top Subject', best ? `${best.name} (${best.pct}%)` : '—', 'bi-trophy', true]
+                                            ].map(([label, value, icon, wide]) => (
+                                                <Col xs={wide ? 12 : 6} key={label}>
+                                                    <div className="rounded-3 p-2 px-3 h-100" style={{ background: 'rgba(255,255,255,0.14)', border: '1px solid rgba(255,255,255,0.18)' }}>
+                                                        <div className="small text-white-50"><i className={`bi ${icon} me-1`}></i>{label}</div>
+                                                        <div className="fw-bold text-truncate" style={{ fontSize: '1.15rem', whiteSpace: 'nowrap' }} title={String(value)}>{value}</div>
                                                     </div>
-                                                    <div className="flex-grow-1">
-                                                        <h5 className="fw-bold mb-1 text-dark">{subject.name}</h5>
-                                                        <div className="progress rounded-pill bg-light" style={{ height: '8px' }}>
-                                                            <div 
-                                                                className={`progress-bar bg-${color} rounded-pill shadow-sm`} 
-                                                                role="progressbar" 
-                                                                style={{ width: `${percentage}%` }}
-                                                            ></div>
+                                                </Col>
+                                            ))}
+                                        </Row>
+
+                                        {role === 'parent' && (
+                                            <Button variant="light" className="rounded-pill fw-bold mt-4" style={{ color: '#7A5358' }} onClick={() => navigate('/progress-report')}>
+                                                <i className="bi bi-clipboard-data me-2"></i>View Full Progress Report
+                                            </Button>
+                                        )}
+                                    </Card.Body>
+                                </Card>
+                            </Col>
+
+                            <Col lg={8}>
+                                {/* Quick summary */}
+                                {subjects.length > 1 && (
+                                    <Row className="g-3 mb-3">
+                                        {[
+                                            ['Highest', best, 'bi-arrow-up-circle-fill', '#1E9E5A'],
+                                            ['Lowest', lowest, 'bi-arrow-down-circle-fill', '#C4472B'],
+                                            ['Average', { name: 'All subjects', pct: Math.round(subjects.reduce((s, x) => s + x.pct, 0) / subjects.length * 10) / 10 }, 'bi-bar-chart-fill', '#91696E']
+                                        ].map(([label, s, icon, color]) => (
+                                            <Col sm={4} key={label}>
+                                                <Card className="border-0 shadow-sm rounded-4 h-100">
+                                                    <Card.Body className="p-3 d-flex align-items-center gap-3">
+                                                        <i className={`bi ${icon} fs-3`} style={{ color }}></i>
+                                                        <div className="min-w-0">
+                                                            <div className="small text-muted">{label}</div>
+                                                            <div className="fw-bold text-dark">{s.pct}%</div>
+                                                            <div className="small text-muted text-truncate">{s.name}</div>
+                                                        </div>
+                                                    </Card.Body>
+                                                </Card>
+                                            </Col>
+                                        ))}
+                                    </Row>
+                                )}
+
+                                <Card className="border-0 shadow-sm rounded-4">
+                                    <Card.Body className="p-2 p-md-3">
+                                        {subjects.map((subject, idx) => {
+                                            const g = gradeFor(subject.pct);
+                                            return (
+                                                <div key={idx} className={`d-flex align-items-center gap-3 p-3 rounded-4 result-subject-row ${idx < subjects.length - 1 ? 'border-bottom' : ''}`}>
+                                                    <div className="rounded-4 d-flex align-items-center justify-content-center flex-shrink-0" style={{ width: 52, height: 52, background: '#F3ECEA', color: '#91696E' }}>
+                                                        <i className={`bi ${subjectIcon(subject.name)} fs-4`}></i>
+                                                    </div>
+                                                    <div className="flex-grow-1 min-w-0">
+                                                        <div className="d-flex align-items-center gap-2 mb-2">
+                                                            <h6 className="fw-bold mb-0 text-dark text-truncate" style={{ fontFamily: 'Fraunces, Georgia, serif', fontSize: '1.1rem' }}>{subject.name}</h6>
+                                                            <span className="badge rounded-pill fw-bold" style={{ background: g.bg, color: g.color }}>{g.label}</span>
+                                                            {best && best.name === subject.name && subjects.length > 1 && <i className="bi bi-trophy-fill text-warning" title="Top subject"></i>}
+                                                        </div>
+                                                        <div className="rounded-pill" style={{ height: 8, background: '#EEE8E3' }} title={`${subject.name}: ${subject.pct}%`}>
+                                                            <div className="rounded-pill h-100" style={{ width: `${subject.pct}%`, background: '#91696E', transition: 'width 0.8s ease' }}></div>
                                                         </div>
                                                     </div>
-                                                    <div className="ms-4 text-end">
-                                                        <div className="h2 fw-bold text-dark mb-0">{subject.score}</div>
-                                                        <div className="small text-muted">Out of {subject.totalMarks}</div>
+                                                    <div className="text-end flex-shrink-0" style={{ minWidth: 86 }}>
+                                                        <div className="fw-bold text-dark lh-1" style={{ fontSize: '1.6rem' }}>{subject.score}<span className="text-muted fw-normal" style={{ fontSize: '0.95rem' }}> / {subject.totalMarks}</span></div>
+                                                        <div className="small text-muted mt-1">{subject.pct}%</div>
                                                     </div>
-                                                </Card.Body>
-                                            </Card>
-                                        </Col>
-                                    );
-                                })}
-                            </Row>
-                            
-                            <div className="mt-4 p-4 bg-light rounded-4 border border-dashed border-secondary border-opacity-25 text-center">
-                                <p className="small text-muted mb-0">
-                                    <i className="bi bi-info-circle me-2 text-primary"></i>
-                                    This is a system-generated academic report based on the marks published by the class teacher for Grade {classNo}.
-                                </p>
-                            </div>
-                        </Col>
-                    </Row>
-                ) : (
+                                                </div>
+                                            );
+                                        })}
+                                    </Card.Body>
+                                </Card>
+
+                                <div className="mt-3 px-4 py-3 rounded-4 d-flex align-items-center gap-3" style={{ background: '#F6F0EE' }}>
+                                    <i className="bi bi-shield-check fs-4" style={{ color: '#91696E' }}></i>
+                                    <p className="small text-muted mb-0">
+                                        System-generated report card based on marks published by the class teacher for Grade {classNo}.
+                                        {result.updatedAt && <> Last updated {new Date(result.updatedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}.</>}
+                                    </p>
+                                </div>
+                            </Col>
+                        </Row>
+                    );
+                })() : (
                     <Card className="border-0 shadow-sm rounded-4">
                         <Card.Body className="p-5 text-center">
                             <i className="bi bi-journal-x text-muted mb-3" style={{ fontSize: '4rem' }}></i>

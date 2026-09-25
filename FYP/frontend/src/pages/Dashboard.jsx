@@ -346,7 +346,15 @@ const Dashboard = () => {
         <Layout>
             <Container fluid className="py-2">
                 <div className="mb-4">
-                    <h2 className="fw-bold text-dark">Welcome back, {userData.name}!</h2>
+                    <h2 className="fw-bold text-dark mb-2">Welcome back, {userData.name}!</h2>
+                    {userData.role?.toLowerCase() === 'student' && localStorage.getItem('classNo') && (
+                        <div className="d-flex flex-wrap align-items-center gap-2">
+                            <span className="badge rounded-pill fw-semibold px-3 py-2" style={{ background: '#F3ECEA', color: '#7A5358', fontSize: '0.85rem' }}>
+                                <i className="bi bi-mortarboard-fill me-2"></i>Class {localStorage.getItem('classNo')}
+                            </span>
+                            <span className="text-muted small">Here's what's happening in your class today.</span>
+                        </div>
+                    )}
                     {/* <p className="text-muted">You are logged in as <span className="badge bg-primary bg-opacity-10 text-primary text-uppercase">{userData.role}</span></p> */}
                 </div>
 

@@ -1,5 +1,9 @@
 const Parent = require('../models/parent');
 const { sendMail } = require('./mailer');
+const { renderVoucherHtml, voucherNumberFor, escapeHtml } = require('./feeVoucher');
+
+// Public base URL of the app, used for "view voucher online" links in emails.
+const APP_URL = (process.env.APP_URL || 'http://localhost:8080').replace(/\/+$/, '');
 
 // --- shared email shell -----------------------------------------------
 
@@ -124,6 +128,136 @@ async function notifyFeeOverdue(fee) {
     });
 }
 
+function feeAmountRows(fee) {
+    const original = fee.originalAmount ?? fee.amount;
+    return `
+        <tr><td style="padding:4px 8px; color:#6b7280;">Fee Amount</td><td style="padding:4px 8px;">Rs. ${original}</td></tr>
+        ${fee.discountAmount > 0 ? `<tr><td style="padding:4px 8px; color:#6b7280;">Discount (${fee.discountPercent}%)</td><td style="padding:4px 8px; color:#047857;">- Rs. ${fee.discountAmount}</td></tr>` : ''}
+        ${fee.fineAmount > 0 ? `<tr><td style="padding:4px 8px; color:#6b7280;">Fine${fee.fineReason ? ` (${escapeHtml(fee.fineReason)})` : ''}</td><td style="padding:4px 8px; color:#b91c1c;">+ Rs. ${fee.fineAmount}</td></tr>` : ''}
+        <tr><td style="padding:4px 8px; color:#6b7280;">Net Payable</td><td style="padding:4px 8px;"><strong>Rs. ${fee.amount}</strong></td></tr>`;
+}
+
+function voucherAttachment(fee) {
+    return {
+        filename: `Fee-Voucher-${voucherNumberFor(fee)}.html`,
+        content: renderVoucherHtml(fee),
+        contentType: 'text/html'
+    };
+}
+
+// New fee voucher(s) generated for a parent. One email per parent listing
+// every voucher issued to them in this batch (several children and/or
+// several months), each voucher attached as a printable HTML file.
+async function notifyFeesIssued({ parentEmail, parentName, fees }) {
+    if (!parentEmail || !fees || !fees.length) return { sent: false, skipped: true };
+
+    const blocks = fees.map(fee => `
+        <div style="border:1px solid #e5e7eb; border-radius:6px; padding:10px 12px; margin:12px 0;">
+            <div style="font-weight:bold; color:#14243F;">${escapeHtml(fee.studentName)} &middot; Class ${escapeHtml(fee.classNo || 'N/A')} &middot; ${escapeHtml(fee.month)} ${fee.year}</div>
+            <table style="border-collapse: collapse; margin-top: 6px; width: 100%;">
+                <tr><td style="padding:4px 8px; color:#6b7280;">Voucher No.</td><td style="padding:4px 8px;">${voucherNumberFor(fee)}</td></tr>
+                ${feeAmountRows(fee)}
+                <tr><td style="padding:4px 8px; color:#6b7280;">Due Date</td><td style="padding:4px 8px;"><strong>${formatDate(fee.dueDate)}</strong></td></tr>
+            </table>
+            <a href="${APP_URL}/api/fees/${fee._id}/voucher" style="font-size:13px; color:#1d4ed8;">View / print voucher online</a>
+        </div>`).join('');
+
+    const html = wrapEmail(fees.length > 1 ? 'New Fee Vouchers Issued' : 'New Fee Voucher Issued', `
+        <p>Dear ${escapeHtml(parentName || 'Parent/Guardian')},</p>
+        <p>The following fee voucher${fees.length > 1 ? 's have' : ' has'} been issued. The printable voucher${fees.length > 1 ? 's are' : ' is'} attached to this email.</p>
+        ${blocks}
+        <p>You can pay online or upload your bank receipt from the <strong>My Fees</strong> section in EduGuardian.</p>
+    `);
+
+    const first = fees[0];
+    const subject = fees.length > 1
+        ? `Fee Vouchers Issued (${fees.length})`
+        : `Fee Voucher Issued: ${first.studentName} - ${first.month} ${first.year}`;
+
+    return sendMail({
+        to: parentEmail,
+        subject,
+        html,
+        attachments: fees.map(voucherAttachment)
+    });
+}
+
+// Reminder sent the day before an unpaid voucher's due date.
+async function notifyFeeDueTomorrow(fee) {
+    if (!fee.parentEmail) {
+        console.warn(`[notifications] Fee ${fee._id} has no parentEmail on file.`);
+        return { sent: false, skipped: true };
+    }
+    const period = fee.year ? `${fee.month} ${fee.year}` : fee.month;
+    const html = wrapEmail('Fee Due Tomorrow', `
+        <p>Dear Parent/Guardian,</p>
+        <p>This is a reminder that the fee voucher for <strong>${escapeHtml(fee.studentName)}</strong> (Class ${escapeHtml(fee.classNo || 'N/A')})
+        for <strong>${escapeHtml(period)}</strong> is due <strong>tomorrow, ${formatDate(fee.dueDate)}</strong>.</p>
+        <table style="border-collapse: collapse; margin: 12px 0; width: 100%;">
+            <tr><td style="padding:4px 8px; color:#6b7280;">Voucher No.</td><td style="padding:4px 8px;">${voucherNumberFor(fee)}</td></tr>
+            ${feeAmountRows(fee)}
+        </table>
+        <p>Please pay before the due date to avoid the voucher becoming overdue.
+        <a href="${APP_URL}/api/fees/${fee._id}/voucher" style="color:#1d4ed8;">View / print voucher</a></p>
+    `);
+    return sendMail({
+        to: fee.parentEmail,
+        subject: `Reminder: Fee due tomorrow - ${fee.studentName} (${period})`,
+        html,
+        attachments: [voucherAttachment(fee)]
+    });
+}
+
+// One-time code to confirm an online fee payment. Unlike the other
+// notifications, the caller needs to know whether it was delivered, so the
+// sendMail result is returned.
+async function notifyPaymentOtp({ to, parentName, code, minutes, fee, paymentMethod, accountLast4 }) {
+    const html = wrapEmail('Payment Verification Code', `
+        <p>Dear ${escapeHtml(parentName || 'Parent/Guardian')},</p>
+        <p>Use the code below to confirm your fee payment of <strong>Rs. ${fee.amount}</strong>
+        for <strong>${escapeHtml(fee.studentName)}</strong> (${escapeHtml(fee.month)} ${fee.year})
+        via ${escapeHtml(paymentMethod)} •••• ${escapeHtml(accountLast4)}.</p>
+        <div style="text-align:center; margin: 20px 0;">
+            <span style="display:inline-block; font-size: 30px; font-weight: bold; letter-spacing: 8px; color:#14243F; background:#f3f4f6; padding: 12px 24px; border-radius: 8px;">${code}</span>
+        </div>
+        <p>This code expires in <strong>${minutes} minutes</strong> and can be used only once.</p>
+        <p style="color:#b91c1c;">Never share this code with anyone. If you did not try to make this payment, please ignore this email.</p>
+    `);
+    return sendMail({
+        to,
+        subject: `${code} is your EduGuardian payment verification code`,
+        html
+    });
+}
+
+// Confirmation after a successful online payment (voucher now Under Review). `payment` is a serialized
+// payment (see serializePayment in app.js) plus parentEmail and school.
+async function notifyPaymentReceived(payment) {
+    if (!payment.parentEmail) return { sent: false, skipped: true };
+    const v = payment.voucher || {};
+    const method = payment.accountLast4 ? `${payment.paymentMethod} (•••• ${payment.accountLast4})` : payment.paymentMethod;
+    const html = wrapEmail('Payment Received', `
+        <p>Dear ${escapeHtml(payment.parentName || 'Parent/Guardian')},</p>
+        <p>We have received your fee payment for <strong>${escapeHtml(payment.studentName)}</strong>. Thank you!
+        The payment is now under review; the voucher will be marked Paid once the school verifies it.</p>
+        <table style="border-collapse: collapse; margin: 12px 0; width: 100%;">
+            <tr><td style="padding:4px 8px; color:#6b7280;">Transaction ID</td><td style="padding:4px 8px;"><strong>${escapeHtml(payment.transactionId)}</strong></td></tr>
+            <tr><td style="padding:4px 8px; color:#6b7280;">Voucher No.</td><td style="padding:4px 8px;">${escapeHtml(v.voucherNumber || '')}</td></tr>
+            <tr><td style="padding:4px 8px; color:#6b7280;">Fee Month</td><td style="padding:4px 8px;">${escapeHtml(`${v.month || ''} ${v.year || ''}`)}</td></tr>
+            <tr><td style="padding:4px 8px; color:#6b7280;">Amount Paid</td><td style="padding:4px 8px;"><strong>Rs. ${payment.amount}</strong></td></tr>
+            <tr><td style="padding:4px 8px; color:#6b7280;">Payment Method</td><td style="padding:4px 8px;">${escapeHtml(method)}</td></tr>
+            <tr><td style="padding:4px 8px; color:#6b7280;">Date</td><td style="padding:4px 8px;">${new Date(payment.createdAt).toLocaleString('en-GB')}</td></tr>
+            <tr><td style="padding:4px 8px; color:#6b7280;">Status</td><td style="padding:4px 8px; color:#b45309;"><strong>Under Review</strong></td></tr>
+        </table>
+        <p>You can view and print the receipt from the <strong>My Fees</strong> section in EduGuardian.</p>
+    `);
+    return sendMail({
+        to: payment.parentEmail,
+        subject: `Payment Received: ${payment.studentName} - ${v.month || ''} ${v.year || ''} (${payment.transactionId})`,
+        html
+    });
+}
+
 // A homework's due date has passed and the student's submission is still Pending.
 async function notifyHomeworkLate({ studentId, studentName, classNo, homeworkTitle, subject, dueDate }) {
     const parent = await getParentForStudent(studentId);
@@ -152,5 +286,9 @@ module.exports = {
     notifyAbsence,
     notifyResultPublished,
     notifyFeeOverdue,
+    notifyFeesIssued,
+    notifyFeeDueTomorrow,
+    notifyPaymentOtp,
+    notifyPaymentReceived,
     notifyHomeworkLate
 };

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Container, Row, Col, Card, Button, Badge, Spinner, Alert, Modal, Form, Table } from 'react-bootstrap';
 import { Navigate, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
+import PaymentModal from '../components/PaymentModal';
 import Axios from 'axios';
 
 const MyFees = () => {
@@ -21,11 +22,7 @@ const MyFees = () => {
     
     const [showPayModal, setShowPayModal] = useState(false);
     const [payments, setPayments] = useState([]);
-    const [payMethod, setPayMethod] = useState('Mock Card');
-    const [payForm, setPayForm] = useState({ holder: '', number: '', expiry: '', secret: '' });
-    const [paying, setPaying] = useState(false);
-    const [payError, setPayError] = useState(null);
-    const [submittedPayment, setSubmittedPayment] = useState(null);
+    const [historyFilter, setHistoryFilter] = useState('All');
     const [receipt, setReceipt] = useState(null);
 
     const [showUploadModal, setShowUploadModal] = useState(false);
@@ -81,9 +78,16 @@ const MyFees = () => {
 
     // Most recent payment for a voucher (payments arrive newest first)
     const latestPaymentFor = (feeId) => payments.find(p => p.voucher?._id === feeId);
+    const isCompleted = (p) => p.status === 'Successful' || p.status === 'Approved';
+    const completedPaymentFor = (feeId) => payments.find(p => p.voucher?._id === feeId && isCompleted(p));
 
     const visibleFeeIds = new Set(fees.map(f => f._id));
     const visiblePayments = payments.filter(p => p.voucher && visibleFeeIds.has(p.voucher._id));
+    const filteredHistory = visiblePayments.filter(p =>
+        historyFilter === 'All' ? true
+            : historyFilter === 'Under Review' ? (p.status === 'Successful' || p.status === 'Pending')
+                : historyFilter === 'Failed' ? (p.status === 'Failed' || p.status === 'Rejected')
+                    : p.status === historyFilter);
 
     const voucherNumber = (fee) => `VCH-${fee._id.slice(-8).toUpperCase()}`;
 
@@ -109,51 +113,14 @@ const MyFees = () => {
 
     const handlePayClick = (fee) => {
         setSelectedFee(fee);
-        setPayMethod('Mock Card');
-        setPayForm({ holder: '', number: '', expiry: '', secret: '' });
-        setPayError(null);
-        setSubmittedPayment(null);
         setShowPayModal(true);
     };
 
-    const closePayModal = () => {
-        if (paying) return;
-        setShowPayModal(false);
-        setSubmittedPayment(null);
-    };
-
-    const handlePaySubmit = async (e) => {
-        e.preventDefault();
-        setPayError(null);
-        const digits = payForm.number.replace(/\D/g, '');
-        if (payMethod === 'Mock Card') {
-            if (digits.length !== 16) return setPayError('Enter a 16-digit dummy card number.');
-            if (!/^(0[1-9]|1[0-2])\/\d{2}$/.test(payForm.expiry)) return setPayError('Enter expiry as MM/YY.');
-            if (!/^\d{3}$/.test(payForm.secret)) return setPayError('Enter a 3-digit dummy CVV.');
-        } else {
-            if (!/^03\d{9}$/.test(digits)) return setPayError('Enter an 11-digit dummy mobile number (03XXXXXXXXX).');
-            if (!/^\d{4,5}$/.test(payForm.secret)) return setPayError('Enter a 4-5 digit dummy PIN.');
-        }
-
-        setPaying(true);
-        try {
-            // CVV / PIN are validated here only and never sent to the server.
-            const res = await Axios.post('/api/payments', {
-                role: 'parent',
-                email,
-                voucherId: selectedFee._id,
-                amount: selectedFee.amount,
-                paymentMethod: payMethod,
-                accountNumber: digits
-            });
-            setSubmittedPayment(res.data.payment);
-            fetchPayments();
-            fetchFees();
-        } catch (err) {
-            setPayError(err.response?.data?.message || 'Payment submission failed. Please try again.');
-        } finally {
-            setPaying(false);
-        }
+    // Called after every processed attempt (and on a 409, when the voucher
+    // changed underneath us) so the cards and history stay current.
+    const handlePaymentProcessed = () => {
+        fetchPayments();
+        fetchFees();
     };
 
     const handleViewReceipt = async (paymentId) => {
@@ -181,8 +148,15 @@ const MyFees = () => {
     };
 
     const paymentBadge = (status) => {
-        const color = status === 'Approved' ? 'success' : status === 'Rejected' ? 'danger' : 'warning';
-        return <Badge bg={color} className={`bg-opacity-10 text-${color} px-3 py-2 rounded-pill`}>{status}</Badge>;
+        const map = {
+            Successful: ['info', 'Under Review'],
+            Approved: ['success', 'Approved'],
+            Failed: ['danger', 'Failed'],
+            Rejected: ['danger', 'Rejected'],
+            Pending: ['warning', 'Awaiting Approval']
+        };
+        const [color, label] = map[status] || ['secondary', status];
+        return <Badge bg={color} className={`bg-opacity-10 text-${color} px-3 py-2 rounded-pill`}>{label}</Badge>;
     };
 
     const handleUploadClick = (fee) => {
@@ -241,7 +215,7 @@ const MyFees = () => {
                         </div>
                         <div>
                             <h2 className="fw-bold text-dark mb-0">My Fees & Invoices</h2>
-                            <p className="text-muted mb-0">View pending fees and pay online (simulated).</p>
+                            <p className="text-muted mb-0">View your fee vouchers and pay online.</p>
                         </div>
                     </div>
                 </div>
@@ -267,7 +241,18 @@ const MyFees = () => {
                                                 <h5 className="fw-bold mb-1">{fee.studentName}</h5>
                                             </div>
                                             <div className="text-end">
+                                                {fee.discountAmount > 0 && (
+                                                    <div className="small text-muted text-decoration-line-through">Rs {fee.originalAmount}</div>
+                                                )}
                                                 <h3 className="fw-bold text-dark mb-0">Rs {fee.amount}</h3>
+                                                {fee.discountAmount > 0 && (
+                                                    <Badge bg="success" className="bg-opacity-75">{fee.discountPercent}% discount</Badge>
+                                                )}
+                                                {fee.fineAmount > 0 && (
+                                                    <div className="small text-danger mt-1" title={fee.fineReason}>
+                                                        <i className="bi bi-exclamation-circle me-1"></i>incl. Rs {fee.fineAmount} fine{fee.fineReason ? ` (${fee.fineReason})` : ''}
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
 
@@ -289,18 +274,22 @@ const MyFees = () => {
                                                     Payment Status: <span className="ms-1">{paymentBadge(latestPaymentFor(fee._id).status)}</span>
                                                 </p>
                                             )}
-                                            {latestPaymentFor(fee._id)?.status === 'Rejected' && latestPaymentFor(fee._id).rejectionReason && (
+                                            {fee.status !== 'Paid' && (latestPaymentFor(fee._id)?.failureReason || (latestPaymentFor(fee._id)?.status === 'Rejected' && latestPaymentFor(fee._id).rejectionReason)) && (
                                                 <p className="small text-danger mb-0 mt-2">
                                                     <i className="bi bi-exclamation-circle me-2"></i>
-                                                    Reason: {latestPaymentFor(fee._id).rejectionReason}
+                                                    Last attempt: {latestPaymentFor(fee._id).failureReason || latestPaymentFor(fee._id).rejectionReason}
                                                 </p>
                                             )}
                                         </div>
 
                                         <div className="mt-auto pt-3 border-top d-flex flex-column gap-2">
-                                            {fee.adminVoucher && (
+                                            {fee.adminVoucher ? (
                                                 <Button variant="outline-secondary" className="w-100 rounded-pill fw-bold" onClick={() => downloadFile(fee.adminVoucher)} title="Download / View Voucher">
                                                     <i className="bi bi-download me-2"></i>Download Fee Voucher
+                                                </Button>
+                                            ) : (
+                                                <Button variant="outline-secondary" className="w-100 rounded-pill fw-bold" href={`/api/fees/${fee._id}/voucher`} target="_blank" rel="noopener noreferrer" title="View / Print Voucher">
+                                                    <i className="bi bi-printer me-2"></i>View / Print Voucher
                                                 </Button>
                                             )}
                                             {fee.status === 'Pending' && latestPaymentFor(fee._id)?.status === 'Pending' && (
@@ -336,8 +325,8 @@ const MyFees = () => {
                                                     <i className="bi bi-check-circle-fill me-2"></i>Payment Complete
                                                 </Button>
                                             )}
-                                            {fee.status === 'Paid' && latestPaymentFor(fee._id)?.status === 'Approved' && (
-                                                <Button variant="outline-success" className="w-100 rounded-pill fw-bold" onClick={() => handleViewReceipt(latestPaymentFor(fee._id)._id)}>
+                                            {(fee.status === 'Paid' || fee.status === 'Review') && completedPaymentFor(fee._id) && (
+                                                <Button variant="outline-success" className="w-100 rounded-pill fw-bold" onClick={() => handleViewReceipt(completedPaymentFor(fee._id)._id)}>
                                                     <i className="bi bi-file-earmark-text me-2"></i>View Receipt
                                                 </Button>
                                             )}
@@ -360,8 +349,15 @@ const MyFees = () => {
                 {!loading && (
                     <Card className="border-0 shadow-sm rounded-4 overflow-hidden mt-5">
                         <Card.Body className="p-0">
-                            <div className="p-4 pb-3">
+                            <div className="p-4 pb-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
                                 <h5 className="fw-bold mb-0"><i className="bi bi-clock-history me-2 text-primary"></i>Payment History</h5>
+                                <div className="d-flex gap-1 flex-wrap">
+                                    {['All', 'Under Review', 'Approved', 'Failed'].map(f => (
+                                        <Button key={f} size="sm" variant={historyFilter === f ? 'primary' : 'light'} className="rounded-pill px-3" onClick={() => setHistoryFilter(f)}>
+                                            {f}
+                                        </Button>
+                                    ))}
+                                </div>
                             </div>
                             <div className="table-responsive">
                                 <Table hover className="align-middle mb-0">
@@ -377,24 +373,27 @@ const MyFees = () => {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {visiblePayments.length > 0 ? visiblePayments.map(p => (
+                                        {filteredHistory.length > 0 ? filteredHistory.map(p => (
                                             <tr key={p._id}>
                                                 <td className="ps-4 fw-bold small">{p.transactionId}</td>
                                                 <td>
-                                                    <div className="fw-bold">{p.voucher.month} Fee</div>
+                                                    <div className="fw-bold">{p.voucher.month} {p.voucher.year}</div>
                                                     <div className="small text-muted">{p.studentName}</div>
                                                 </td>
                                                 <td className="fw-bold text-primary">Rs {p.amount.toLocaleString()}</td>
-                                                <td className="small">{p.paymentMethod.replace('Mock ', '')}</td>
-                                                <td className="text-center">
+                                                <td className="small">
+                                                    {p.paymentMethod}
+                                                    {p.accountLast4 && <div className="text-muted">•••• {p.accountLast4}</div>}
+                                                </td>
+                                                <td className="text-center" style={{ maxWidth: '220px' }}>
                                                     {paymentBadge(p.status)}
-                                                    {p.status === 'Rejected' && p.rejectionReason && (
-                                                        <div className="small text-danger mt-1">{p.rejectionReason}</div>
+                                                    {(p.failureReason || (p.status === 'Rejected' && p.rejectionReason)) && (
+                                                        <div className="small text-danger mt-1">{p.failureReason || p.rejectionReason}</div>
                                                     )}
                                                 </td>
-                                                <td className="small">{new Date(p.createdAt).toLocaleDateString()}</td>
+                                                <td className="small">{new Date(p.createdAt).toLocaleString()}</td>
                                                 <td className="text-center">
-                                                    {p.status === 'Approved' ? (
+                                                    {isCompleted(p) ? (
                                                         <Button size="sm" variant="outline-success" className="rounded-pill px-3" onClick={() => handleViewReceipt(p._id)}>
                                                             <i className="bi bi-file-earmark-text me-1"></i>View Receipt
                                                         </Button>
@@ -402,7 +401,7 @@ const MyFees = () => {
                                                 </td>
                                             </tr>
                                         )) : (
-                                            <tr><td colSpan="7" className="text-center py-4 text-muted">No online payments yet.</td></tr>
+                                            <tr><td colSpan="7" className="text-center py-4 text-muted">{visiblePayments.length ? 'No payments match this filter.' : 'No online payments yet.'}</td></tr>
                                         )}
                                     </tbody>
                                 </Table>
@@ -454,101 +453,16 @@ const MyFees = () => {
             </Modal>
 
            
-            <Modal show={showPayModal} onHide={closePayModal} centered backdrop="static">
-                <Modal.Header closeButton={!paying} className="border-0 pb-0">
-                    <Modal.Title className="fw-bold">{submittedPayment ? 'Payment Submitted' : 'Mock Online Payment'}</Modal.Title>
-                </Modal.Header>
-                <Modal.Body className="p-4">
-                    {submittedPayment ? (
-                        <div className="text-center">
-                            <i className="bi bi-hourglass-split text-warning" style={{ fontSize: '3.5rem' }}></i>
-                            <h5 className="fw-bold mt-3">Payment submitted successfully.</h5>
-                            <p className="text-muted">Your payment is waiting for admin approval.</p>
-                            <div className="bg-light rounded-3 p-3 text-start small mb-3">
-                                <div className="d-flex justify-content-between mb-1"><span className="text-muted">Transaction ID</span><span className="fw-bold">{submittedPayment.transactionId}</span></div>
-                                <div className="d-flex justify-content-between mb-1"><span className="text-muted">Amount</span><span className="fw-bold">Rs {submittedPayment.amount.toLocaleString()}</span></div>
-                                <div className="d-flex justify-content-between align-items-center"><span className="text-muted">Payment Status</span>{paymentBadge(submittedPayment.status)}</div>
-                            </div>
-                            <Button variant="primary" className="w-100 rounded-pill fw-bold" onClick={closePayModal}>Done</Button>
-                        </div>
-                    ) : selectedFee && (
-                        <>
-                            <div className="text-center mb-3">
-                                <i className="bi bi-wallet2 text-primary" style={{ fontSize: '2.5rem' }}></i>
-                                <h4 className="fw-bold mt-1 mb-0">Rs {selectedFee.amount.toLocaleString()}</h4>
-                            </div>
-                            <div className="bg-light rounded-3 p-3 small mb-3">
-                                <div className="d-flex justify-content-between mb-1"><span className="text-muted">Student</span><span className="fw-bold">{selectedFee.studentName}</span></div>
-                                <div className="d-flex justify-content-between mb-1"><span className="text-muted">Parent</span><span className="fw-bold">{localStorage.getItem('userName')}</span></div>
-                                <div className="d-flex justify-content-between mb-1"><span className="text-muted">Voucher No.</span><span className="fw-bold">{voucherNumber(selectedFee)}</span></div>
-                                <div className="d-flex justify-content-between mb-1"><span className="text-muted">Fee Month</span><span className="fw-bold">{selectedFee.month} {selectedFee.year}</span></div>
-                                <div className="d-flex justify-content-between"><span className="text-muted">Due Date</span><span className="fw-bold">{new Date(selectedFee.dueDate).toLocaleDateString()}</span></div>
-                            </div>
-
-                            <Alert variant="info" className="small py-2">
-                                <i className="bi bi-info-circle me-2"></i>Simulated payment for demonstration. Use dummy details only — no real money is charged.
-                            </Alert>
-                            {payError && <Alert variant="danger" className="small py-2">{payError}</Alert>}
-
-                            <Form onSubmit={handlePaySubmit}>
-                                <Form.Group className="mb-3">
-                                    <Form.Label className="small fw-bold">Payment Method</Form.Label>
-                                    <div className="d-flex gap-2">
-                                        {['Mock Card', 'Mock JazzCash', 'Mock Easypaisa'].map(m => (
-                                            <Button key={m} type="button" size="sm"
-                                                variant={payMethod === m ? 'primary' : 'outline-secondary'}
-                                                className="flex-fill rounded-pill"
-                                                onClick={() => { setPayMethod(m); setPayForm({ holder: '', number: '', expiry: '', secret: '' }); setPayError(null); }}>
-                                                {m}
-                                            </Button>
-                                        ))}
-                                    </div>
-                                </Form.Group>
-
-                                <Form.Group className="mb-2">
-                                    <Form.Label className="small fw-bold">{payMethod === 'Mock Card' ? 'Card Holder Name' : 'Account Holder Name'}</Form.Label>
-                                    <Form.Control required value={payForm.holder} onChange={e => setPayForm({ ...payForm, holder: e.target.value })} placeholder="Test User" />
-                                </Form.Group>
-
-                                {payMethod === 'Mock Card' ? (
-                                    <>
-                                        <Form.Group className="mb-2">
-                                            <Form.Label className="small fw-bold">Dummy Card Number</Form.Label>
-                                            <Form.Control required inputMode="numeric" autoComplete="off" maxLength={19} value={payForm.number} onChange={e => setPayForm({ ...payForm, number: e.target.value })} placeholder="4242 4242 4242 4242" />
-                                        </Form.Group>
-                                        <Row className="g-2 mb-3">
-                                            <Col>
-                                                <Form.Label className="small fw-bold">Expiry (MM/YY)</Form.Label>
-                                                <Form.Control required autoComplete="off" maxLength={5} value={payForm.expiry} onChange={e => setPayForm({ ...payForm, expiry: e.target.value })} placeholder="12/30" />
-                                            </Col>
-                                            <Col>
-                                                <Form.Label className="small fw-bold">Dummy CVV</Form.Label>
-                                                <Form.Control required type="password" inputMode="numeric" autoComplete="off" maxLength={3} value={payForm.secret} onChange={e => setPayForm({ ...payForm, secret: e.target.value })} placeholder="123" />
-                                            </Col>
-                                        </Row>
-                                    </>
-                                ) : (
-                                    <>
-                                        <Form.Group className="mb-2">
-                                            <Form.Label className="small fw-bold">Dummy {payMethod.replace('Mock ', '')} Mobile Number</Form.Label>
-                                            <Form.Control required inputMode="numeric" autoComplete="off" maxLength={11} value={payForm.number} onChange={e => setPayForm({ ...payForm, number: e.target.value })} placeholder="03001234567" />
-                                        </Form.Group>
-                                        <Form.Group className="mb-3">
-                                            <Form.Label className="small fw-bold">Dummy MPIN</Form.Label>
-                                            <Form.Control required type="password" inputMode="numeric" autoComplete="off" maxLength={5} value={payForm.secret} onChange={e => setPayForm({ ...payForm, secret: e.target.value })} placeholder="1234" />
-                                        </Form.Group>
-                                    </>
-                                )}
-
-                                <Button type="submit" variant="primary" className="w-100 rounded-pill fw-bold py-2" disabled={paying}>
-                                    {paying ? <Spinner size="sm" className="me-2" /> : <i className="bi bi-shield-check me-2"></i>}
-                                    {paying ? 'Submitting...' : 'Submit Payment'}
-                                </Button>
-                            </Form>
-                        </>
-                    )}
-                </Modal.Body>
-            </Modal>
+            <PaymentModal
+                show={showPayModal}
+                fee={selectedFee}
+                parentName={localStorage.getItem('userName')}
+                email={email}
+                voucherNumber={selectedFee ? voucherNumber(selectedFee) : ''}
+                onHide={() => setShowPayModal(false)}
+                onPaid={handlePaymentProcessed}
+                onViewReceipt={(paymentId) => { setShowPayModal(false); handleViewReceipt(paymentId); }}
+            />
 
             <Modal show={!!receipt} onHide={() => setReceipt(null)} centered>
                 <Modal.Header closeButton className="border-0 pb-0">
@@ -558,23 +472,31 @@ const MyFees = () => {
                     {receipt && (
                         <div id="payment-receipt">
                             <h2 className="fw-bold text-primary text-center mb-0">{receipt.school}</h2>
-                            <p className="text-muted small text-center mb-3">Fee Payment Receipt</p>
+                            <p className="text-muted small text-center mb-1">Fee Payment Receipt</p>
+                            <p className="text-center mb-3"><span className="badge bg-success rounded-pill px-3 py-2">PAYMENT SUCCESSFUL</span></p>
                             <table className="table table-sm small mb-0">
                                 <tbody>
                                     <tr><td className="text-muted">Student Name</td><td className="text-end fw-bold">{receipt.studentName}</td></tr>
                                     <tr><td className="text-muted">Parent Name</td><td className="text-end fw-bold">{receipt.parentName}</td></tr>
+                                    {receipt.classNo && <tr><td className="text-muted">Class</td><td className="text-end fw-bold">{receipt.classNo}</td></tr>}
                                     <tr><td className="text-muted">Voucher Number</td><td className="text-end fw-bold">{receipt.voucherNumber}</td></tr>
                                     <tr><td className="text-muted">Fee Month</td><td className="text-end fw-bold">{receipt.feeMonth}</td></tr>
                                     <tr><td className="text-muted">Amount</td><td className="text-end fw-bold">Rs {receipt.amount.toLocaleString()}</td></tr>
-                                    <tr><td className="text-muted">Payment Method</td><td className="text-end fw-bold">{receipt.paymentMethod}</td></tr>
+                                    <tr><td className="text-muted">Payment Method</td><td className="text-end fw-bold">{receipt.paymentMethod}{receipt.accountLast4 ? ` (•••• ${receipt.accountLast4})` : ''}</td></tr>
+                                    {receipt.accountHolder && <tr><td className="text-muted">Account Holder</td><td className="text-end fw-bold">{receipt.accountHolder}</td></tr>}
                                     <tr><td className="text-muted">Transaction ID</td><td className="text-end fw-bold">{receipt.transactionId}</td></tr>
                                     <tr><td className="text-muted">Payment Date</td><td className="text-end fw-bold">{new Date(receipt.paymentDate).toLocaleString()}</td></tr>
-                                    <tr><td className="text-muted">Approval Date</td><td className="text-end fw-bold">{new Date(receipt.approvalDate).toLocaleString()}</td></tr>
-                                    <tr><td className="text-muted">Approved By</td><td className="text-end fw-bold">{receipt.approvedBy}</td></tr>
+                                    {receipt.voucherStatus && <tr><td className="text-muted">Verification</td><td className="text-end fw-bold">{receipt.voucherStatus}</td></tr>}
+                                    {receipt.approvedBy && (
+                                        <>
+                                            <tr><td className="text-muted">Approval Date</td><td className="text-end fw-bold">{new Date(receipt.approvalDate).toLocaleString()}</td></tr>
+                                            <tr><td className="text-muted">Approved By</td><td className="text-end fw-bold">{receipt.approvedBy}</td></tr>
+                                        </>
+                                    )}
                                 </tbody>
                             </table>
                             <p className="paid text-success fw-bold fs-4 text-center mt-3 mb-0">Status: {receipt.status}</p>
-                            <p className="text-muted text-center mt-3 mb-0" style={{ fontSize: '0.7rem' }}>Simulated payment for academic demonstration. No real money was transferred.</p>
+                            <p className="text-muted text-center mt-3 mb-0" style={{ fontSize: '0.7rem' }}>This is a computer-generated receipt and does not require a signature.</p>
                         </div>
                     )}
                 </Modal.Body>

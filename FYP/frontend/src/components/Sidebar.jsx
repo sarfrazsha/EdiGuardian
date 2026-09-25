@@ -201,12 +201,19 @@ const Sidebar = ({ showMobileSidebar, onHideMobileSidebar }) => {
                     {/* Name & Role */}
                     <div className="overflow-hidden">
                         <p className="mb-0 fw-bold text-white text-truncate" style={{ fontSize: '0.95rem' }}>{uname || 'User'}</p>
-                        <span
-                            className="badge bg-primary bg-opacity-25 text-primary small text-uppercase"
-                            style={{ letterSpacing: '0.5px', fontSize: '0.65rem' }}
-                        >
-                            {role}
-                        </span>
+                        <div className="d-flex flex-wrap gap-1">
+                            <span
+                                className="badge bg-primary bg-opacity-25 text-primary small text-uppercase"
+                                style={{ letterSpacing: '0.5px', fontSize: '0.65rem' }}
+                            >
+                                {role}
+                            </span>
+                            {role?.toLowerCase() === 'student' && localStorage.getItem('classNo') && (
+                                <span className="badge small" style={{ fontSize: '0.65rem', background: 'rgba(255,255,255,0.12)', color: '#E9E3DC' }}>
+                                    <i className="bi bi-mortarboard me-1"></i>Class {localStorage.getItem('classNo')}
+                                </span>
+                            )}
+                        </div>
                     </div>
                 </div>
 
@@ -314,6 +321,7 @@ const Sidebar = ({ showMobileSidebar, onHideMobileSidebar }) => {
 
                         {navLink('/manage-classes', 'bi-building-fill', 'Classes')}
                         {navLink('/manage-timetable', 'bi-calendar3-week', 'Manage Timetable')}
+                        {navLink('/fee-structure', 'bi-sliders', 'Fee Structure')}
                         {navLink('/issue-fees', 'bi-plus-circle-fill', 'Issue Fees')}
                         {navLink('/all-fees', 'bi-cash-coin', 'Fee Records')}
                     </>
@@ -353,6 +361,7 @@ const Sidebar = ({ showMobileSidebar, onHideMobileSidebar }) => {
                             Parent Portal
                         </div>
                         {navLink('/results', 'bi-award-fill', 'Results')}
+                        {navLink('/progress-report', 'bi-clipboard-data-fill', 'Progress Report')}
                         {navLink('/my-fees', 'bi-cash-stack', 'My Fees')}
                         {navLink('/datesheet', 'bi-calendar-event', 'Datesheet')}
                     </>

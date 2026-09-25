@@ -1,10 +1,14 @@
 const mongoose = require("mongoose");
 const schema = mongoose.Schema;
 
-// Simulated (mock) online payment against a fee voucher. No real gateway is
-// involved and no real financial data is stored: card/wallet numbers are
-// dummy values and only their last 4 digits are kept; CVV/PIN never reach
-// the server. A payment stays 'Pending' until an admin approves or rejects it.
+// Online payment attempt against a fee voucher, processed by the built-in
+// sandbox gateway (no real gateway, no real money). No real financial data is
+// stored: only the last 4 digits of the card / wallet number are kept and
+// CVV / PIN never reach the server.
+//   Successful - payment went through; the voucher is marked Paid immediately
+//   Failed     - attempt did not go through (see failureReason)
+//   Pending / Approved / Rejected - older admin-reviewed payments, still
+//                supported so existing records keep working.
 const Payment = new schema(
     {
         transactionId: {
@@ -32,16 +36,31 @@ const Payment = new schema(
         },
         paymentMethod: {
             type: String,
-            enum: ['Mock Card', 'Mock JazzCash', 'Mock Easypaisa'],
+            // Legacy 'Mock ...' values are kept only so existing records validate.
+            enum: ['Card', 'JazzCash', 'Easypaisa', 'Mock Card', 'Mock JazzCash', 'Mock Easypaisa'],
             required: true
+        },
+        accountHolder: {
+            type: String,
+            trim: true,
+            default: ''
         },
         accountLast4: {
             type: String
         },
         status: {
             type: String,
-            enum: ['Pending', 'Approved', 'Rejected'],
+            enum: ['Successful', 'Failed', 'Pending', 'Approved', 'Rejected'],
             default: 'Pending'
+        },
+        // Sandbox test scenario the attempt was run with, and why it failed.
+        scenario: {
+            type: String,
+            default: ''
+        },
+        failureReason: {
+            type: String,
+            default: ''
         },
         rejectionReason: {
             type: String,
@@ -65,8 +84,8 @@ const Payment = new schema(
             type: Date,
             default: null
         },
-        // Set to the voucherId while the payment is Pending or Approved and
-        // unset on rejection. The unique index below means a voucher can have
+        // Set to the voucherId while the payment is Successful, Pending or
+        // Approved; never set on Failed and unset on rejection. The unique index below means a voucher can have
         // at most one live (pending/approved) payment, even under races.
         activeVoucher: {
             type: mongoose.Schema.Types.ObjectId
